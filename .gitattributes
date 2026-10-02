@@ -1,0 +1,7 @@
+# Source documents are evidence: never let git normalise their bytes (their SHA-256 is cited
+# in docs/design.md section 10).
+docs/sources/** -text
+
+# Migration files are hashed by the runner; fixed line endings keep the hash identical on
+# every machine regardless of core.autocrlf.
+*.sql text eol=lf

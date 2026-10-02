@@ -1,0 +1,18 @@
+[project]
+name = "recon"
+version = "0.1.0"
+description = "Payment reconciliation engine, Level 1. Synthetic demo data only."
+requires-python = ">=3.12"
+dependencies = [
+  "psycopg[binary]==3.3.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
