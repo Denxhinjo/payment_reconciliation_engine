@@ -57,7 +57,7 @@ database. If no server is configured, the database tests **fail** rather than sk
 
 ```sh
 docker run -d --name recon-pg-test -e POSTGRES_PASSWORD=recon_test \
-  -p 127.0.0.1:54329:5432 postgres:17-alpine
+  -p 127.0.0.1:54329:5432 postgres:18-alpine
 
 cd worker
 python -m venv .venv

@@ -315,3 +315,37 @@ real migrations were not modified.
 tail of the chain.
 **Rejected:** Letting every reader (web, worker, reports) re-implement "which resolution is in
 force". One definition in the database cannot drift between consumers.
+
+## Stage 1 follow-up: Neon verification, 2026-10-02
+
+Migrations were run once against a throwaway Neon branch (`roles-test`, PostgreSQL 18.6, since
+deleted). All six applied, **including role creation in 0006**. The full suite then gave
+157 passed / 1 failed, and the failure exposed a test weakness recorded below.
+
+### D-039: Role privileges are tested from the catalog; SET ROLE tests are a bonus
+**Status:** accepted (chosen by project owner, 2026-10-02)
+**Finding:** On Neon the deploying owner (`neondb_owner`, CREATEROLE, not superuser) holds
+ADMIN over the roles it creates but neither INHERIT nor SET (PostgreSQL 16+ behaviour). The
+old role tests switched roles *inside* the block that expected error 42501, so on Neon the
+42501 came from `SET ROLE` itself, and 12 "lacks privilege" tests **passed without testing
+anything**. Locally they were valid only because the test user is a superuser.
+**Decision:** (1) An exhaustive catalog test: for every table and view and every privilege
+type, `has_table_privilege()` for each role must equal an explicit expected matrix, so missing
+*and extra* grants fail. This needs no role membership and behaves identically on Docker and
+Neon. (2) Two end-to-end tests remain, with `SET ROLE` moved into a fixture *outside* the
+asserted block, so a 42501 can only come from the statement under test. They skip only when
+the server forbids the test connection to SET ROLE.
+**Rejected:** (a) A migration granting the owner SET on both roles: it works, but changes the
+schema to suit the tests. (b) Documenting the limitation only, which would leave Neon without
+a role test.
+**Exception to D-036 (fail, never skip):** the end-to-end skip is allowed because the same
+guarantee is covered by the catalog test on every server. Nothing untested hides behind it.
+**Verified:** an extra `GRANT UPDATE ON resolution TO recon_web`, added to a copy of the
+migrations, fails both the matrix test and the end-to-end test.
+
+### D-040: Tests run on PostgreSQL 18, the deployment target's major version
+**Status:** accepted (chosen by project owner, 2026-10-02)
+**Decision:** The local Docker test server and the CI service container use `postgres:18-alpine`,
+matching the Neon branch (18.6).
+**Rejected:** (a) Staying on 17, which tests a different major version from production. (b) A
+17 + 18 CI matrix: there is no deployment on 17 to protect.

@@ -45,7 +45,66 @@ def test_failed_job_requires_an_error(conn, build):
         conn.execute("UPDATE job SET status = 'failed' WHERE id = %s", (job_id,))
 
 
-# --- roles --------------------------------------------------------------------------------
+# --- roles: exhaustive catalog check (D-039) ----------------------------------------------
+#
+# Checked with has_table_privilege(), which needs no role membership, so this runs the same
+# on a local superuser and on Neon (where the deploying owner may not SET ROLE, see D-039).
+
+PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+
+# Every privilege each role holds. Anything not listed must be absent.
+WEB_WRITES = {"import_file", "job", "resolution"}
+WORKER_UPDATES = {"reconciliation_run", "job"}
+RUNNER_ONLY = {"schema_migration"}
+
+
+def _expected(role: str, relation: str) -> set[str]:
+    if relation in RUNNER_ONLY:
+        return set()
+    if role == "recon_web":
+        return {"SELECT"} | ({"INSERT"} if relation in WEB_WRITES else set())
+    if role == "recon_worker":
+        return {"SELECT", "INSERT"} | ({"UPDATE"} if relation in WORKER_UPDATES else set())
+    raise AssertionError(role)
+
+
+@pytest.mark.parametrize("role", ["recon_web", "recon_worker"])
+def test_role_privileges_are_exactly_the_intended_matrix(conn, role):
+    relations = [
+        name for (name,) in conn.execute(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v') ORDER BY c.relname"
+        )
+    ]
+    assert "resolution" in relations and "current_resolution" in relations
+
+    differences = []
+    for relation in relations:
+        actual = {
+            privilege for privilege in PRIVILEGES
+            if conn.execute(
+                "SELECT has_table_privilege(%s, %s, %s)", (role, f"public.{relation}", privilege)
+            ).fetchone()[0]
+        }
+        expected = _expected(role, relation)
+        if actual != expected:
+            differences.append(
+                f"{relation}: extra {sorted(actual - expected)}, missing {sorted(expected - actual)}"
+            )
+    assert differences == [], f"{role} privileges differ from the intended matrix:\n" + "\n".join(differences)
+
+
+@pytest.mark.parametrize("role", ["recon_web", "recon_worker"])
+def test_roles_cannot_log_in_and_are_not_privileged(conn, role):
+    flags = conn.execute(
+        "SELECT rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, rolbypassrls "
+        "FROM pg_roles WHERE rolname = %s",
+        (role,),
+    ).fetchone()
+    assert flags == (False, False, False, False, False)
+
+
+# --- roles: end-to-end, where the test connection may SET ROLE (D-039) ----------------------
 
 @pytest.fixture
 def resolved(conn, build):
@@ -58,48 +117,33 @@ def resolved(conn, build):
     return month, ids, resolution_id
 
 
-def test_web_role_can_insert_a_resolution(conn, resolved):
-    month, ids, _ = resolved
-    with conn.transaction():
-        conn.execute("SET LOCAL ROLE recon_web")
-        conn.execute(
-            "INSERT INTO resolution (exception_id, reason_code, note, resolved_by) "
-            "VALUES (%s, 'other_see_note', 'Synthetic note written by the web role.', %s)",
-            (ids[5], month.staff),
-        )
+@pytest.fixture
+def web_role(conn):
+    """Switch to recon_web for the test body.
+
+    Skips only when this server forbids the test connection to SET ROLE (a non-superuser
+    owner on PostgreSQL 16+, e.g. Neon). The same guarantee is covered there by the catalog
+    test above, so the skip hides no untested property (D-039).
+    """
+    (can_set,) = conn.execute("SELECT pg_has_role(current_user, 'recon_web', 'SET')").fetchone()
+    if not can_set:
+        pytest.skip("test connection may not SET ROLE recon_web; covered by the catalog test")
+    conn.execute("SET LOCAL ROLE recon_web")
+    yield
     conn.execute("RESET ROLE")
 
 
-@pytest.mark.parametrize(
-    "statement",
-    [
-        "UPDATE resolution SET note = note",
-        "DELETE FROM resolution",
-        "UPDATE import_file SET original_name = original_name",
-        "DELETE FROM import_file",
-        "UPDATE reconciliation_run SET error = error",
-        "INSERT INTO run_match (run_id, ordinal, pass, explanation) VALUES (1, 1, 'exact', 'x')",
-        "UPDATE ledger_entry SET description = description",
-    ],
-)
-def test_web_role_lacks_privileges_to_change_evidence(conn, resolved, statement):
-    """Refused by privilege (42501) before any trigger runs."""
-    with raises_sqlstate(conn, INSUFFICIENT_PRIVILEGE):
-        conn.execute("SET LOCAL ROLE recon_web")
-        conn.execute(statement)
+def test_web_role_can_insert_a_resolution_end_to_end(conn, resolved, web_role):
+    month, ids, _ = resolved
+    conn.execute(
+        "INSERT INTO resolution (exception_id, reason_code, note, resolved_by) "
+        "VALUES (%s, 'other_see_note', 'Synthetic note written by the web role.', %s)",
+        (ids[5], month.staff),
+    )
 
 
-@pytest.mark.parametrize(
-    "statement",
-    [
-        "UPDATE resolution SET note = note",
-        "DELETE FROM resolution",
-        "DELETE FROM reconciliation_run",
-        "DELETE FROM ledger_entry",
-        "SELECT * FROM schema_migration",
-    ],
-)
-def test_worker_role_lacks_privileges_outside_its_job(conn, resolved, statement):
+def test_web_role_update_is_refused_by_privilege_end_to_end(conn, resolved, web_role):
+    """The role switch happened in the fixture, outside the asserted block, so the 42501 can
+    only come from the UPDATE itself."""
     with raises_sqlstate(conn, INSUFFICIENT_PRIVILEGE):
-        conn.execute("SET LOCAL ROLE recon_worker")
-        conn.execute(statement)
+        conn.execute("UPDATE resolution SET note = note")
