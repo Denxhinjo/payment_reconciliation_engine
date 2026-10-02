@@ -1,0 +1,337 @@
+{
+  "counts": {
+    "bank_entries": 67,
+    "card_payments": 606,
+    "card_refunds": 6,
+    "direct_bank_transfers": 40,
+    "ledger_rows": 653,
+    "payouts": 30,
+    "settlement_rows": 612
+  },
+  "fee_rule": "Orrery (fictional): 1.4% rounded half-up to the cent, plus EUR 0.25",
+  "files": {
+    "synthetic_bank_camt053_2026-09.xml": "e9443591ce940db8382ffb0a80a95348817f64229393ea5a53de4731a27381ca",
+    "synthetic_ledger_2026-09.csv": "691de447dcb6aa0244acf155c0f919a0fc99898d4627d07082557f83dca749ef",
+    "synthetic_orrery_settlement_2026-09.csv": "359e60947870726f9c038232007ee1261c44b423df042a6099e2daa5feabd100"
+  },
+  "generator_version": "1.0.0",
+  "label": "SYNTHETIC DEMO DATA. Orrery Payments and Demo Bank are fictional.",
+  "month": "2026-09",
+  "natural_timing": [
+    {
+      "expected": {
+        "bank": [],
+        "kind": "exception",
+        "ledger": [
+          "LE-000616",
+          "LE-000617",
+          "LE-000618",
+          "LE-000619",
+          "LE-000620",
+          "LE-000621",
+          "LE-000622",
+          "LE-000623",
+          "LE-000624",
+          "LE-000625",
+          "LE-000626",
+          "LE-000627",
+          "LE-000628",
+          "LE-000629",
+          "LE-000630",
+          "LE-000631"
+        ],
+        "reason": "timing",
+        "settlement": [
+          "BT-0000576",
+          "BT-0000577",
+          "BT-0000578",
+          "BT-0000579",
+          "BT-0000580",
+          "BT-0000581",
+          "BT-0000582",
+          "BT-0000583",
+          "BT-0000584",
+          "BT-0000585",
+          "BT-0000586",
+          "BT-0000587",
+          "BT-0000588",
+          "BT-0000589",
+          "BT-0000590",
+          "BT-0000591"
+        ]
+      },
+      "id": "T1",
+      "what": "Payout PO-20260929 for card payments on 2026-09-29 is dated 2026-10-01, after the statement period."
+    },
+    {
+      "expected": {
+        "bank": [],
+        "kind": "exception",
+        "ledger": [
+          "LE-000633",
+          "LE-000634",
+          "LE-000635",
+          "LE-000636",
+          "LE-000637",
+          "LE-000638",
+          "LE-000639",
+          "LE-000640",
+          "LE-000641",
+          "LE-000642",
+          "LE-000643",
+          "LE-000644",
+          "LE-000645",
+          "LE-000646",
+          "LE-000647",
+          "LE-000648",
+          "LE-000649",
+          "LE-000650",
+          "LE-000651",
+          "LE-000652",
+          "LE-000653"
+        ],
+        "reason": "timing",
+        "settlement": [
+          "BT-0000592",
+          "BT-0000593",
+          "BT-0000594",
+          "BT-0000595",
+          "BT-0000596",
+          "BT-0000597",
+          "BT-0000598",
+          "BT-0000599",
+          "BT-0000600",
+          "BT-0000601",
+          "BT-0000602",
+          "BT-0000603",
+          "BT-0000604",
+          "BT-0000605",
+          "BT-0000606",
+          "BT-0000607",
+          "BT-0000608",
+          "BT-0000609",
+          "BT-0000610",
+          "BT-0000611",
+          "BT-0000612"
+        ]
+      },
+      "id": "T2",
+      "what": "Payout PO-20260930 for card payments on 2026-09-30 is dated 2026-10-02, after the statement period."
+    },
+    {
+      "expected": {
+        "bank": [],
+        "kind": "exception",
+        "ledger": [
+          "LE-000632"
+        ],
+        "reason": "timing",
+        "settlement": []
+      },
+      "id": "T3",
+      "what": "Bank transfer PAY-000625 booked in the ledger on 2026-09-30 arrives at the bank after the statement period."
+    }
+  ],
+  "planted": [
+    {
+      "expected": {
+        "bank": [],
+        "kind": "exception",
+        "ledger": [
+          "LE-000281",
+          "LE-000282",
+          "LE-000283",
+          "LE-000284",
+          "LE-000285",
+          "LE-000286",
+          "LE-000287",
+          "LE-000288",
+          "LE-000289"
+        ],
+        "reason": "missing_from_bank",
+        "settlement": [
+          "BT-0000261",
+          "BT-0000262",
+          "BT-0000263",
+          "BT-0000264",
+          "BT-0000265",
+          "BT-0000266",
+          "BT-0000267",
+          "BT-0000268",
+          "BT-0000269"
+        ]
+      },
+      "how": "Payout PO-20260914 (9 payments, net EUR 1752.23, payout date 2026-09-16) is in the settlement report but never reaches the bank.",
+      "id": "P1",
+      "problem": "Missing payout"
+    },
+    {
+      "expected": {
+        "bank": [
+          "SYNBANK-202609-000032"
+        ],
+        "kind": "exception",
+        "ledger": [
+          "LE-000278"
+        ],
+        "reason": "amount_mismatch",
+        "settlement": [
+          "BT-0000260"
+        ]
+      },
+      "how": "Single-payment payout PO-20260913: report states gross EUR 316.85, fee 4.69, net 312.16; the bank received 311.76 (0.40 less).",
+      "id": "P2",
+      "problem": "Fee mismatch"
+    },
+    {
+      "expected": {
+        "bank": [
+          "SYNBANK-202609-000043"
+        ],
+        "kind": "match",
+        "ledger": [
+          "LE-000316",
+          "LE-000317",
+          "LE-000318",
+          "LE-000319",
+          "LE-000320",
+          "LE-000321",
+          "LE-000322",
+          "LE-000323",
+          "LE-000324",
+          "LE-000325",
+          "LE-000326",
+          "LE-000327",
+          "LE-000328",
+          "LE-000329",
+          "LE-000330",
+          "LE-000331",
+          "LE-000332",
+          "LE-000333",
+          "LE-000334",
+          "LE-000335",
+          "LE-000336",
+          "LE-000337",
+          "LE-000338",
+          "LE-000339",
+          "LE-000340",
+          "LE-000341",
+          "LE-000342",
+          "LE-000343",
+          "LE-000344",
+          "LE-000345",
+          "LE-000346",
+          "LE-000347",
+          "LE-000348",
+          "LE-000349",
+          "LE-000350",
+          "LE-000351",
+          "LE-000352",
+          "LE-000353",
+          "LE-000354",
+          "LE-000355",
+          "LE-000356",
+          "LE-000357",
+          "LE-000358",
+          "LE-000359",
+          "LE-000360",
+          "LE-000361",
+          "LE-000362",
+          "LE-000363",
+          "LE-000364",
+          "LE-000365"
+        ],
+        "pass": "many_to_one",
+        "settlement": [
+          "BT-0000294",
+          "BT-0000295",
+          "BT-0000296",
+          "BT-0000297",
+          "BT-0000298",
+          "BT-0000299",
+          "BT-0000300",
+          "BT-0000301",
+          "BT-0000302",
+          "BT-0000303",
+          "BT-0000304",
+          "BT-0000305",
+          "BT-0000306",
+          "BT-0000307",
+          "BT-0000308",
+          "BT-0000309",
+          "BT-0000310",
+          "BT-0000311",
+          "BT-0000312",
+          "BT-0000313",
+          "BT-0000314",
+          "BT-0000315",
+          "BT-0000316",
+          "BT-0000317",
+          "BT-0000318",
+          "BT-0000319",
+          "BT-0000320",
+          "BT-0000321",
+          "BT-0000322",
+          "BT-0000323",
+          "BT-0000324",
+          "BT-0000325",
+          "BT-0000326",
+          "BT-0000327",
+          "BT-0000328",
+          "BT-0000329",
+          "BT-0000330",
+          "BT-0000331",
+          "BT-0000332",
+          "BT-0000333",
+          "BT-0000334",
+          "BT-0000335",
+          "BT-0000336",
+          "BT-0000337",
+          "BT-0000338",
+          "BT-0000339",
+          "BT-0000340",
+          "BT-0000341",
+          "BT-0000342",
+          "BT-0000343"
+        ]
+      },
+      "how": "50 card payments on 2026-09-16 are paid out as one bank credit of EUR 10624.87 (payout PO-20260916).",
+      "id": "P3",
+      "problem": "50-to-1 batch deposit"
+    },
+    {
+      "expected": {
+        "bank": [],
+        "kind": "exception",
+        "ledger": [
+          "LE-000527"
+        ],
+        "original_matched_ledger_entry": "LE-000526",
+        "reason": "possible_duplicate",
+        "settlement": []
+      },
+      "how": "Payment PAY-000520 (EUR 371.21) is recorded twice in the ledger: LE-000526 and LE-000527. The payment itself was collected and paid out once.",
+      "id": "P4",
+      "problem": "Duplicate ledger entry"
+    },
+    {
+      "expected": {
+        "bank": [
+          "SYNBANK-202609-000049"
+        ],
+        "kind": "exception",
+        "ledger": [],
+        "reason": "unknown_deposit",
+        "settlement": []
+      },
+      "how": "A EUR 250.00 credit on 2026-09-22 with remittance text 'SYNTHETIC UNREFERENCED TRANSFER' has no counterpart in the ledger or the report.",
+      "id": "P5",
+      "problem": "Deposit nobody expected"
+    }
+  ],
+  "seed": 20260901,
+  "statement_period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+  }
+}

@@ -22,7 +22,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     migrate_cmd.add_argument("--dir", type=Path, default=DEFAULT_MIGRATIONS_DIR)
 
+    generate_cmd = commands.add_parser(
+        "generate", help="write a synthetic month (ledger, settlement report, camt.053, planted.json)"
+    )
+    generate_cmd.add_argument("--seed", type=int, required=True)
+    generate_cmd.add_argument("--month", required=True, help="YYYY-MM")
+    generate_cmd.add_argument("--out", type=Path, required=True)
+
     args = parser.parse_args(argv)
+
+    if args.command == "generate":
+        from recon.generate import generate
+
+        for path in generate(args.seed, args.month).write(args.out):
+            print(f"wrote {path}")
+        return 0
 
     if args.command == "migrate":
         if not args.database_url:

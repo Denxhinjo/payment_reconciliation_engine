@@ -5,3 +5,7 @@ docs/sources/** -text
 # Migration files are hashed by the runner; fixed line endings keep the hash identical on
 # every machine regardless of core.autocrlf.
 *.sql text eol=lf
+
+# Generated synthetic month: byte-exact, because planted.json records the files' SHA-256 and a
+# test regenerates them from the seed and compares bytes.
+demo-data/** -text

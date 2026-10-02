@@ -349,3 +349,77 @@ migrations, fails both the matrix test and the end-to-end test.
 matching the Neon branch (18.6).
 **Rejected:** (a) Staying on 17, which tests a different major version from production. (b) A
 17 + 18 CI matrix: there is no deployment on 17 to protect.
+
+## Stage 2 (synthetic generator), 2026-10-02
+
+### D-041: Planted problems are placed by fixed rules, not at random
+**Status:** accepted
+**Decision:** The seeded RNG produces the background (amounts, customers, daily volumes,
+refund picks). Each planted problem sits on a day chosen by an explainable rule: P1 on the
+second Monday, P3 on the third Wednesday, P2 on the second single-payment Sunday, and so on.
+`planted.json` records the exact rows.
+**Rejected:** Random placement. A random P1 could land on a payout dated after the period end
+and become indistinguishable from a timing difference, so the demo's claim "catches all
+five" would depend on the seed.
+
+### D-042: The demo month is committed, and a test proves it reproducible
+**Status:** accepted
+**Decision:** `demo-data/2026-09/` is committed. A test regenerates it from seed 20260901 and
+compares bytes, and `.gitattributes` marks the directory `-text` so git never rewrites line
+endings.
+**Rejected:** (a) Generating at build time only: reviewers could not read the files without
+running code. (b) Committing without the reproduction test: the files and the generator could
+silently drift apart.
+
+### D-043: An independent discrepancy derivation is the planted-problem test
+**Status:** accepted
+**Decision:** The central generator test re-derives every disagreement between the three files
+without reading `planted.json`, and requires that set to equal the planted and timing items
+exactly.
+**Rejected:** Checking only that the planted rows exist. That cannot detect an accidental,
+unplanned discrepancy, which would later show up as a "caught problem" nobody planted.
+**Verified:** with the P2 shortfall set to zero in memory, this test fails, along with the
+reproducibility test.
+
+### D-044: The generator refuses to write a bank file that fails the official XSD
+**Status:** accepted
+**Decision:** `_bank_xml` validates its own output against S1 before returning it.
+**Rejected:** Validating only in tests: a future change could write an invalid file to
+`demo-data/` between test runs.
+
+### D-045: Direct transfers carry no `EndToEndId`; the reference is in `RmtInf/Ustrd`
+**Status:** accepted
+**Decision:** For customer bank transfers the generator omits `Refs` entirely. The payment
+reference is the unstructured remittance text, matched by exact equality (D-024).
+**Rejected:** A placeholder `EndToEndId` value for "not provided". The specific conventional
+value comes from SEPA rulebooks this project has not obtained as a source, so it is not used.
+
+### D-046: Statement timestamps are UTC (`Z`)
+**Status:** accepted
+**Decision:** `CreDtTm`, `FrDtTm` and `ToDtTm` are written in UTC.
+**Rejected:** Local time with an offset (e.g. `+02:00`). Picking the right offset for each
+month needs daylight-saving rules, which are reference data; UTC needs none. Business dates
+are still read as stated (D-026).
+
+### D-047: Bank files declaring a DTD are refused, and validator crashes become rejections
+**Status:** accepted (found by the hostile-input test)
+**Decision:** `camt053.validate` refuses any document containing `<!DOCTYPE`, and converts an
+lxml `XMLSchemaValidateError` into an ordinary `Camt053Error`.
+**Finding:** With entity expansion disabled, an entity reference stays unexpanded in the tree,
+and lxml's schema validator then raised an *internal error* instead of a validation failure,
+which would have crashed the importer instead of rejecting the file.
+**Rejected:** Relying on `resolve_entities=False` alone. It prevents the data leak but not the
+crash, and a camt.053 statement has no legitimate use for a DTD.
+
+### Open item for stage 4: timing rule for payouts dated on the last days of the period
+**Status:** open, **needs owner decision before stage 4**
+**Observation:** Design §5.7 classifies an unmatched payout group as `timing` only if
+`payout_date > period_to`. A payout dated on the last day of the month (or within
+`PAYOUT_WINDOW_DAYS` of it) that the bank books *after* the period would be labelled
+`missing_from_bank`, a false alarm. The ledger-side rule already uses
+`booked_on + window > period_to`. The generator avoids the case: bank bookings never cross the
+period end. So the demo month is unaffected either way, but real data would hit it.
+**Proposed:** use `payout_date + PAYOUT_WINDOW_DAYS > period_to` for payouts too, matching the
+ledger rule. Trade-off: a payout that genuinely went missing in the last 3 days of a month is
+reported as `timing` first. It would surface as missing in the next period's run, which is
+period-close work outside Level 1.

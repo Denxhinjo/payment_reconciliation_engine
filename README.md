@@ -33,17 +33,56 @@ exists to find real ones. See design §3 and decision D-001. Level 1 is EUR only
 
 ```
 db/migrations/      numbered raw-SQL migrations (no ORM)
-worker/recon/       Python worker: migration runner (stage 1); parsers, engine, generator later
+worker/recon/       Python worker: migration runner, synthetic generator; parsers and engine later
 worker/tests/       tests, run against real PostgreSQL
+demo-data/2026-09/  the synthetic demo month (generated, committed, byte-reproducible)
 docs/               design, decision log, sources
 ```
+
+## The synthetic demo month and its planted problems
+
+`demo-data/2026-09/` holds one synthetic month (September 2026), generated with
+
+```sh
+cd worker
+.venv/Scripts/python -m recon generate --seed 20260901 --month 2026-09 --out ../demo-data/2026-09
+```
+
+The same seed and month always produce byte-identical files, and a test regenerates them and
+compares bytes. The month contains 606 card payments through the fictional processor Orrery
+Payments, paid out daily on T+2 with weekend roll-forward. It also has 6 refunds netted inside
+payouts and 40 direct bank transfers: 653 ledger rows, 612 settlement lines, 30 payouts and
+67 bank entries. Orrery's fictional fee is 1.4% (rounded half-up to the cent) plus EUR 0.25.
+
+Five problems are planted deliberately, and the demo must catch every one.
+`planted.json` lists the exact rows involved in each, and the outcome expected from the engine:
+
+| # | Planted problem | What is in the files | Expected outcome |
+|---|---|---|---|
+| P1 | **Missing payout** | Payout PO-20260914 (9 payments, net EUR 1,752.23, dated 2026-09-16) is in the settlement report but never reaches the bank | exception `missing_from_bank` covering its 9 settlement and 9 ledger rows |
+| P2 | **Fee mismatch** | Single-payment payout PO-20260913: gross EUR 316.85, stated fee 4.69, net 312.16; the bank received 311.76, EUR 0.40 less | exception `amount_mismatch` (ledger, settlement and bank row) |
+| P3 | **50-to-1 batch deposit** | 50 card payments on 2026-09-16 paid out as one bank credit of EUR 10,624.87 (payout PO-20260916) | one `many_to_one` match citing 50 ledger + 50 settlement + 1 bank row |
+| P4 | **Duplicate ledger entry** | Payment PAY-000520 (EUR 371.21) recorded twice: LE-000526 and LE-000527 | LE-000526 matched normally; LE-000527 becomes exception `possible_duplicate` |
+| P5 | **Deposit nobody expected** | EUR 250.00 credit on 2026-09-22, remittance text "SYNTHETIC UNREFERENCED TRANSFER", no counterpart anywhere | exception `unknown_deposit` |
+
+These are **expected timing differences, not problems**. They are listed so that nobody
+mistakes them for planted errors:
+
+| # | What | Expected outcome |
+|---|---|---|
+| T1 | Payout PO-20260929 (card payments of 29 Sep) is dated 1 Oct, after the statement period | exception `timing` |
+| T2 | Payout PO-20260930 (card payments of 30 Sep) is dated 2 Oct | exception `timing` |
+| T3 | Bank transfer PAY-000625, booked in the ledger on 30 Sep, reaches the bank in October | exception `timing` |
+
+Every other row in the month reconciles. A test re-derives every disagreement between the
+three files without reading `planted.json`, and requires the result to be exactly the items above.
 
 ## Status
 
 | Stage | State |
 |---|---|
 | 1. Schema | done: migrations 0001–0006, migration runner, constraint tests |
-| 2. Generator | not started (the planted-problem list will be added here) |
+| 2. Generator | done: synthetic month, planted problems, official-XSD validation |
 | 3. Import | not started |
 | 4. Matching passes | not started |
 | 5. Exceptions queue | not started |
@@ -61,7 +100,7 @@ docker run -d --name recon-pg-test -e POSTGRES_PASSWORD=recon_test \
 
 cd worker
 python -m venv .venv
-.venv/Scripts/python -m pip install "psycopg[binary]==3.3.6" "pytest==9.1.1"   # Windows path
+.venv/Scripts/python -m pip install "psycopg[binary]==3.3.6" "lxml==6.1.3" "pytest==9.1.1"   # Windows path
 export RECON_TEST_ADMIN_URL="postgresql://postgres:recon_test@127.0.0.1:54329/postgres"
 .venv/Scripts/python -m pytest
 ```

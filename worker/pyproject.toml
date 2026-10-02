@@ -5,6 +5,7 @@ description = "Payment reconciliation engine, Level 1. Synthetic demo data only.
 requires-python = ">=3.12"
 dependencies = [
   "psycopg[binary]==3.3.6",
+  "lxml==6.1.3",
 ]
 
 [project.optional-dependencies]
