@@ -33,10 +33,11 @@ exists to find real ones. See design §3 and decision D-001. Level 1 is EUR only
 
 ```
 db/migrations/      numbered raw-SQL migrations (no ORM)
-worker/recon/       Python worker: migration runner, synthetic generator, parsers, importer, engine, runs
+worker/recon/       Python worker: migration runner, generator, parsers, importer, engine, runs, resolutions
 worker/tests/       tests, run against real PostgreSQL
 demo-data/2026-09/  the synthetic demo month (generated, committed, byte-reproducible)
 docs/               design, decision log, sources
+tools/              reviewer tools (mutation check of the matching rules; not run in CI)
 ```
 
 ## The synthetic demo month and its planted problems
@@ -85,7 +86,7 @@ three files without reading `planted.json`, and requires the result to be exactl
 | 2. Generator | done: synthetic month, planted problems, official-XSD validation |
 | 3. Import | done: CSV and camt.053 parsers, idempotent import, parse jobs, `recon import` / `recon worker` |
 | 4. Matching passes | done: exact, gross_net, many_to_one, classification with timing deadlines; runs persisted and re-verified by the database |
-| 5. Exceptions queue | not started |
+| 5. Exceptions queue | done: queue view, evidence, resolve and correct (append-only), races decided by the database |
 | 6. Replay test | not started |
 | 7. Web UI | not started |
 
@@ -144,3 +145,20 @@ including the 50-to-1 deposit P3) and raises 7 exceptions: P1, P2, P4 and P5 wit
 reasons, and the three timing items T1–T3. Every timing exception states its deadline (D-048).
 The run is written to the database, which re-checks every match's arithmetic before accepting
 it as finished (D-012).
+
+## Working the exceptions queue
+
+```sh
+cd worker
+.venv/Scripts/python -m recon queue --run 1 --status open        # what needs a human
+.venv/Scripts/python -m recon show --exception 2                 # evidence rows and history
+.venv/Scripts/python -m recon reasons                            # valid reason codes
+.venv/Scripts/python -m recon resolve --exception 2 --reason processor_error_claim_raised     --note "Claim raised with Orrery for the EUR 0.40 shortfall." --staff "Demo Analyst 1"
+.venv/Scripts/python -m recon correct --exception 2 --supersedes 1 --reason other_see_note     --note "Orrery refunded the 0.40 on 6 Oct; claim closed." --staff "Demo Controller"
+```
+
+Every resolution needs a reason code and a written note of at least 10 characters. Resolutions
+are never edited or deleted: a correction is a new resolution that supersedes the one in force,
+and the full history stays visible. The database enforces all of this (D-019, D-020, D-066).
+If two people act on the same exception at once, the database lets exactly one through and the
+other is told who got there first.

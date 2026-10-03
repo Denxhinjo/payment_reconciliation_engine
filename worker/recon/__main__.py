@@ -63,6 +63,30 @@ def main(argv: list[str] | None = None) -> int:
     reconcile_cmd.add_argument("--settlement-file", type=int, required=True, help="import_file id")
     reconcile_cmd.add_argument("--bank-file", type=int, required=True, help="import_file id")
 
+    queue_cmd = commands.add_parser("queue", help="list a run's exceptions")
+    _database_argument(queue_cmd)
+    queue_cmd.add_argument("--run", type=int, required=True)
+    queue_cmd.add_argument("--status", choices=["all", "open", "resolved"], default="all")
+
+    show_cmd = commands.add_parser("show", help="show one exception: evidence and resolution history")
+    _database_argument(show_cmd)
+    show_cmd.add_argument("--exception", type=int, required=True)
+
+    reasons_cmd = commands.add_parser("reasons", help="list the resolution reason codes")
+    _database_argument(reasons_cmd)
+
+    for name, help_text in (("resolve", "record the first resolution of an exception"),
+                            ("correct", "supersede the resolution in force with a new one")):
+        cmd = commands.add_parser(name, help=help_text)
+        _database_argument(cmd)
+        cmd.add_argument("--exception", type=int, required=True)
+        if name == "correct":
+            cmd.add_argument("--supersedes", type=int, required=True,
+                             help="id of the resolution in force being corrected")
+        cmd.add_argument("--reason", required=True, help="a code from `recon reasons`")
+        cmd.add_argument("--note", required=True, help="mandatory written note (at least 10 characters)")
+        cmd.add_argument("--staff", default="Demo Analyst 1", help="display name of the resolver")
+
     args = parser.parse_args(argv)
 
     if args.command == "generate":
@@ -135,6 +159,67 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"run #{run.run_id} finished: {run.matches} matches, {run.exceptions} exceptions, "
               f"result sha256 {run.result_sha256}")
+        return 0
+
+    from recon import resolutions
+    from recon.money import format_minor
+
+    if args.command == "reasons":
+        with _connect(parser, args.database_url) as conn:
+            for code, label in resolutions.reason_codes(conn):
+                print(f"{code:34} {label}")
+        return 0
+
+    if args.command == "queue":
+        with _connect(parser, args.database_url) as conn:
+            items = resolutions.queue(conn, args.run, args.status)
+        for item in items:
+            state = (f"resolved: {item.current_reason_code} by {item.resolved_by}"
+                     if item.status == "resolved" else "OPEN")
+            print(f"#{item.exception_id:<6} {item.suggested_reason:20} {state}")
+            print(f"        {item.explanation}")
+        print(f"{len(items)} exception(s), {sum(i.status == 'open' for i in items)} open")
+        return 0
+
+    if args.command == "show":
+        with _connect(parser, args.database_url) as conn:
+            try:
+                shown = resolutions.detail(conn, args.exception)
+            except LookupError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+        item = shown.item
+        print(f"exception #{item.exception_id} (run #{item.run_id}, #{item.ordinal}): "
+              f"suggested {item.suggested_reason}; {item.status.upper()}")
+        print(f"  {item.explanation}")
+        print("  evidence:")
+        for row in shown.evidence:
+            print(f"    {row.source:10} {row.identifier:28} {row.on.isoformat()} "
+                  f"{row.reference or '':24} EUR {format_minor(row.amount_minor):>12}  {row.detail}")
+        print("  resolution history (oldest first):")
+        for record in shown.history or ():
+            marker = "IN FORCE" if record.in_force else "superseded"
+            print(f"    #{record.resolution_id} {marker}: {record.reason_code} by {record.resolved_by} "
+                  f"at {record.created_at.isoformat(timespec='seconds')}")
+            print(f"        {record.note}")
+        if not shown.history:
+            print("    (none)")
+        return 0
+
+    if args.command in ("resolve", "correct"):
+        with _connect(parser, args.database_url) as conn:
+            staff_id = importer.staff_id_by_name(conn, args.staff)
+            try:
+                if args.command == "resolve":
+                    resolution_id = resolutions.resolve(
+                        conn, args.exception, args.reason, args.note, staff_id)
+                else:
+                    resolution_id = resolutions.correct(
+                        conn, args.exception, args.supersedes, args.reason, args.note, staff_id)
+            except resolutions.ResolutionRefused as exc:
+                print(f"refused: {exc}", file=sys.stderr)
+                return 1
+        print(f"resolution #{resolution_id} recorded for exception #{args.exception}")
         return 0
 
     return 2

@@ -622,8 +622,11 @@ record only, never part of the canonical result.
 **Method:** In a throwaway copy of the repository (never the original), 18 mutations of
 `worker/recon/engine.py` were applied one at a time. Each was an exact textual replacement that
 had to match exactly once. The full suite was run after each, and the failing tests were
-recorded. The baseline in the copy was clean (361 passed). Harness: scratch
-`mutate_engine.py`; not committed, since it only serves this check.
+recorded. The baseline in the copy was clean (361 passed). Harness: committed at
+`tools/mutation_check/mutate_engine.py`, with a README listing each mutation, how to run it
+and the expected result (every mutation caught). It is a reviewer's tool, not a CI gate,
+because it runs the full suite once per mutation. *(Updated 2026-10-03 at the owner's request:
+originally a scratch script, not committed.)*
 **Result:** no mutation survived, and each broke only tests about the rule it changed:
 
 | Mutation | Tests that failed |
@@ -656,3 +659,42 @@ satisfy the gross_net rule".
 **Not doubled, by nature:** M08, M11 and M18 concern date windows, tie-breaks and duplicate
 labelling, which the database finish check does not judge (it checks arithmetic, shape,
 references and currency). Their single engine tests are the intended coverage.
+
+## Stage 5 (exceptions queue), 2026-10-03
+
+### D-065: The queue is a read-only view; views are read-only for every role
+**Status:** accepted
+**Decision:** Migration 0007 adds `exception_queue`: one row per exception with its status
+(`open` until a first resolution exists, then `resolved`), the resolution in force, who made it
+and when, and how many resolutions it has had. Both roles get SELECT only. The same migration
+revokes the worker's INSERT on the `current_resolution` view: 0006's blanket grant had reached
+that view, which PostgreSQL makes auto-updatable, so it was a second path for inserting
+resolutions. The role matrix test now states that views are SELECT-only.
+**Rejected:** (a) A `status` column on `run_exception`: it would have to be updated, and that
+table is append-only. (b) Computing status in application code: the web (stage 7) and the CLI
+would each need their own copy of "which resolution is in force".
+
+### D-066: Corrections name what they supersede; the database decides races
+**Status:** accepted
+**Decision:** `correct(exception, supersedes_id, ...)` inserts a resolution superseding the one
+the caller saw. If a colleague corrected it meanwhile, `UNIQUE (supersedes_id)` refuses the
+second correction as stale, naming the resolution now in force. Two simultaneous first
+resolutions are decided the same way, by the partial unique index (one root per exception).
+Both races are tested with two real connections, the second confirmed to be waiting on the
+first's lock before the first commits.
+**Rejected:** (a) "Correct whatever is current" without naming it: a reviewer could overwrite a
+correction they never saw. (b) Application-level locking (`SELECT ... FOR UPDATE`): it adds a
+second mechanism for something the constraints already guarantee.
+
+### D-067: Database refusals are translated by constraint name, never re-implemented
+**Status:** accepted
+**Decision:** `recon.resolutions` does not pre-validate notes, codes or chains. It inserts, and
+maps each refusal to a plain message by the constraint that fired (`resolution_note_check`,
+`resolution_one_root_per_exception`, `resolution_superseded_once`, ...). The names were read
+from the database catalog, not assumed. An unrecognised error is re-raised unchanged, so a new
+failure mode cannot be mislabelled as a known one.
+**Finding:** the finished-run trigger (0004) fires before the foreign key on `exception_id`, so
+a non-existent exception arrived as "run missing / not finished". The translation checks which
+case it is and says "no exception with id N".
+**Rejected:** Mirroring the rules in Python for nicer messages: two copies of a rule drift, and
+the database copy is the one that is enforced.

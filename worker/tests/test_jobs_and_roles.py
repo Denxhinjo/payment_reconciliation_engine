@@ -58,9 +58,14 @@ WORKER_UPDATES = {"reconciliation_run", "job"}
 RUNNER_ONLY = {"schema_migration"}
 
 
+VIEWS = {"current_resolution", "exception_queue"}   # read-only for every role
+
+
 def _expected(role: str, relation: str) -> set[str]:
     if relation in RUNNER_ONLY:
         return set()
+    if relation in VIEWS:
+        return {"SELECT"}
     if role == "recon_web":
         return {"SELECT"} | ({"INSERT"} if relation in WEB_WRITES else set())
     if role == "recon_worker":
@@ -76,7 +81,8 @@ def test_role_privileges_are_exactly_the_intended_matrix(conn, role):
             "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v') ORDER BY c.relname"
         )
     ]
-    assert "resolution" in relations and "current_resolution" in relations
+    assert {"resolution", "current_resolution", "exception_queue"} <= set(relations)
+    assert {r for r in relations if r in VIEWS} == VIEWS
 
     differences = []
     for relation in relations:
