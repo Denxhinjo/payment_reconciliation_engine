@@ -553,3 +553,106 @@ connection is still inside the uncommitted test transaction. With the fixture fi
 that guard test fails (checked).
 **Rejected:** Relying on test order or on each test's first statement, which is what hid the
 problem in stage 1.
+
+## Stage 4 (matching engine), 2026-10-03
+
+### D-057: Dates in explanations use a fixed month table, not strftime("%b")
+**Status:** accepted
+**Decision:** Explanations write dates as "30 Sep 2026" from a constant month-name table.
+**Rejected:** `strftime("%b")`, whose output depends on the process locale. The same inputs could
+then produce different explanation text, and therefore different result bytes, on a machine
+with another locale. That would break replay (design §6).
+
+### D-058: A payout reference with conflicting dates or ids fails the run
+**Status:** accepted
+**Decision:** If the lines sharing a payout reference disagree on `payout_date` or `payout_id`,
+the engine raises `EngineInputError` and the run is recorded as `failed` with that reason.
+**Rejected:** Taking the earliest date, or splitting the group. Each would make the engine guess
+which of the processor's two statements is true, and windows and timing depend on the date.
+
+### D-059: Leftover payouts are diagnosed with a looser lookup, in a fixed priority
+**Status:** accepted (refines design §5.7 step 1)
+**Decision:** After the passes, an unmatched payout group is re-examined with ledger rows found
+by reference only (card, unallocated, any amount or date) and a bank credit found by reference
+only (any date). The first condition that holds sets the reason:
+(1) no credit → `timing` if inside the D-048 window, else `missing_from_bank`;
+(2) credit ≠ Σ net → `amount_mismatch` (states gross, stated fees, deposit, unexplained rest);
+(3) a ledger amount ≠ its line's gross → `amount_mismatch`;
+(4) a line with no ledger entry → `missing_from_ledger`, naming it;
+(5) amounts agree but a date is outside its window → `timing`, stating which date and the deadline.
+**Rejected:** Reusing the strict pass rules for diagnosis: a group that failed *because of* a
+date or an amount would come back with "nothing found", and the explanation could not say
+what actually disagreed.
+
+### D-060: Right amounts, wrong dates, are classified `timing`
+**Status:** accepted
+**Decision:** A payout or transfer whose counterpart exists with the right amount but was booked
+outside its window is `timing`. The explanation names the dates and the window's deadline.
+**Rejected:** `amount_mismatch` (untrue) or `missing_from_bank` (untrue: the money is there).
+The reason list is fixed by the schema; `timing` is the truthful one, and the explanation
+carries the specifics.
+
+### D-061: Runs are recorded before they are computed
+**Status:** accepted
+**Decision:** The `reconciliation_run` row is committed as `running` before the engine starts.
+Matches, exceptions, allocations and the transition to `finished` then go in one transaction.
+On an engine input error, a parser-version mismatch or a database refusal, that transaction
+rolls back and the run is marked `failed` with the reason. A reconcile job is `done` when its
+run is recorded, whether the run finished or failed (as D-052 for parse jobs).
+**Rejected:** Inserting the run only on success: a refused run would leave no trace, and "the
+database refused the engine's output" is precisely the event an auditor would want to see.
+
+### D-062: Bank-side references are trimmed of spaces only, like SQL `btrim`
+**Status:** accepted
+**Decision:** `EndToEndId` and `Ustrd` are compared after removing leading and trailing spaces
+(U+0020) only.
+**Rejected:** Python's default `strip()`, which also removes tabs and newlines. The engine and the
+database finish check (which uses `btrim`) would then disagree on what "the same reference"
+means, and a run the engine considers valid could be refused by the database.
+
+### D-063: The engine's git commit is recorded from `GITHUB_SHA` when available
+**Status:** accepted
+**Decision:** The CLI sets `reconciliation_run.engine_git_sha` from the `GITHUB_SHA` environment
+variable (set by GitHub Actions) and leaves it empty otherwise. It is provenance on the run
+record only, never part of the canonical result.
+**Rejected:** Running `git` from the engine, which makes the engine depend on its environment.
+
+### D-064: Mutation check of the matching rules, and the coverage it added
+**Status:** accepted (owner request for stage 4)
+**Method:** In a throwaway copy of the repository (never the original), 18 mutations of
+`worker/recon/engine.py` were applied one at a time. Each was an exact textual replacement that
+had to match exactly once. The full suite was run after each, and the failing tests were
+recorded. The baseline in the copy was clean (361 passed). Harness: scratch
+`mutate_engine.py`; not committed, since it only serves this check.
+**Result:** no mutation survived, and each broke only tests about the rule it changed:
+
+| Mutation | Tests that failed |
+|---|---|
+| M01 gross_net: 1-cent tolerance | fee-difference cases −1 and +1 cent |
+| M02 many_to_one: accept a partial batch | all-or-nothing batch |
+| M03 exact: drop the date window | outside-window timing; bank before ledger date; deadline sweep |
+| M04 duplicate labelled missing_from_bank | demo P4; demo exception set; P4 explanation; card and transfer duplicate tests |
+| M05 timing: old rule (payout_date > period_to) | D-048 (a); D-048 (b); deadline sweep |
+| M06 timing: no deadline in explanation | D-048 (a); D-048 (b); demo deadlines; deadline sweep |
+| M07 exact: ignore the amount | transfer one cent short |
+| M08 ledger/processor window widened to 2 days | ledger two days off |
+| M09 payout credit: accept debits | payout credit must be money in |
+| M10 payout credit: drop the window | payout window (day 11, day 16); deadline sweep |
+| M11 tie-break: last candidate instead of first | earliest of two identical credits |
+| M12 deposit/debit labels swapped | unknown deposit/debit; demo P5; demo exception set; and three other scenarios with leftovers |
+| M13 many_to_one: drop deposit == Σ net | batch one cent short |
+| M14 exact: drop the reference check | different reference |
+| M15 ledger order reversed | demo P4; card and transfer duplicate tests |
+| M16 ledger timing boundary `>=` | transfer and card boundary cases (missing side) |
+| M17 inconsistent payout dates accepted | engine refusal test; persisted failed-run test |
+| M18 duplicate ignores the amount | same reference, different amount |
+
+**Added because of it:** eight mutations were caught by a single engine test. For the six whose
+rule the database finish check also enforces (M01, M02, M07, M09, M13, M14), six persisted
+near-miss runs were added (`test_near_miss_is_persisted_as_an_exception_and_the_run_finishes`).
+Re-run, each of those six mutations now fails two independent layers: its engine test, *and*
+the database refusing the run. Confirmed for M01 by the failure text: "match #1 does not
+satisfy the gross_net rule".
+**Not doubled, by nature:** M08, M11 and M18 concern date windows, tie-breaks and duplicate
+labelling, which the database finish check does not judge (it checks arithmetic, shape,
+references and currency). Their single engine tests are the intended coverage.

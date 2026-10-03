@@ -52,8 +52,16 @@ def main(argv: list[str] | None = None) -> int:
     import_cmd.add_argument("--file", type=Path, required=True)
     import_cmd.add_argument("--staff", default="Demo Analyst 1", help="display name of the uploader")
 
-    worker_cmd = commands.add_parser("worker", help="process all queued parse jobs, then exit")
+    worker_cmd = commands.add_parser(
+        "worker", help="process all queued parse and reconcile jobs, then exit")
     _database_argument(worker_cmd)
+
+    reconcile_cmd = commands.add_parser(
+        "reconcile", help="run the engine on three imported files and record the run")
+    _database_argument(reconcile_cmd)
+    reconcile_cmd.add_argument("--ledger-file", type=int, required=True, help="import_file id")
+    reconcile_cmd.add_argument("--settlement-file", type=int, required=True, help="import_file id")
+    reconcile_cmd.add_argument("--bank-file", type=int, required=True, help="import_file id")
 
     args = parser.parse_args(argv)
 
@@ -98,13 +106,35 @@ def main(argv: list[str] | None = None) -> int:
         print(f"file #{outcome.file_id} imported and parsed: {outcome.rows} rows")
         return 0
 
+    from recon import runs
+
+    # Provenance only, never part of the result: the commit the engine ran from, when known.
+    git_sha = os.environ.get("GITHUB_SHA")
+
     if args.command == "worker":
         with _connect(parser, args.database_url) as conn:
             outcomes = importer.run_parse_jobs(conn)
+            reconciled = []
+            while (done := runs.process_reconcile_job(conn, engine_git_sha=git_sha)) is not None:
+                reconciled.append(done)
         for o in outcomes:
             print(f"job #{o.job_id}: file #{o.file_id} {o.status}"
                   + (f" ({o.rows} rows)" if o.status == "parsed" else f": {o.error}"))
-        print(f"{len(outcomes)} parse job(s) processed")
+        for job_id, run in reconciled:
+            print(f"job #{job_id}: run #{run.run_id} {run.status}"
+                  + (f": {run.error}" if run.error else ""))
+        print(f"{len(outcomes)} parse job(s) and {len(reconciled)} reconcile job(s) processed")
+        return 0
+
+    if args.command == "reconcile":
+        with _connect(parser, args.database_url) as conn:
+            run = runs.create_and_run(conn, args.ledger_file, args.settlement_file, args.bank_file,
+                                      engine_git_sha=git_sha)
+        if run.status != "finished":
+            print(f"run #{run.run_id} FAILED: {run.error}", file=sys.stderr)
+            return 1
+        print(f"run #{run.run_id} finished: {run.matches} matches, {run.exceptions} exceptions, "
+              f"result sha256 {run.result_sha256}")
         return 0
 
     return 2

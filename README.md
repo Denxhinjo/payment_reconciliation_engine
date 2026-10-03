@@ -33,7 +33,7 @@ exists to find real ones. See design §3 and decision D-001. Level 1 is EUR only
 
 ```
 db/migrations/      numbered raw-SQL migrations (no ORM)
-worker/recon/       Python worker: migration runner, synthetic generator, parsers, importer; engine later
+worker/recon/       Python worker: migration runner, synthetic generator, parsers, importer, engine, runs
 worker/tests/       tests, run against real PostgreSQL
 demo-data/2026-09/  the synthetic demo month (generated, committed, byte-reproducible)
 docs/               design, decision log, sources
@@ -84,7 +84,7 @@ three files without reading `planted.json`, and requires the result to be exactl
 | 1. Schema | done: migrations 0001–0006, migration runner, constraint tests |
 | 2. Generator | done: synthetic month, planted problems, official-XSD validation |
 | 3. Import | done: CSV and camt.053 parsers, idempotent import, parse jobs, `recon import` / `recon worker` |
-| 4. Matching passes | not started |
+| 4. Matching passes | done: exact, gross_net, many_to_one, classification with timing deadlines; runs persisted and re-verified by the database |
 | 5. Exceptions queue | not started |
 | 6. Replay test | not started |
 | 7. Web UI | not started |
@@ -130,3 +130,17 @@ export DATABASE_URL="postgresql://..."
 Importing the same bytes again does nothing and reports the existing file. A file the parser
 rejects is kept as evidence, and its rejection reason is recorded; it can never be used in a
 reconciliation run.
+
+## Reconciling
+
+```sh
+cd worker
+.venv/Scripts/python -m recon reconcile --ledger-file 1 --settlement-file 2 --bank-file 3
+# run #1 finished: 65 matches, 7 exceptions, result sha256 ...
+```
+
+On the demo month the engine makes 65 matches (39 `exact`, 3 `gross_net`, 23 `many_to_one`,
+including the 50-to-1 deposit P3) and raises 7 exceptions: P1, P2, P4 and P5 with their expected
+reasons, and the three timing items T1–T3. Every timing exception states its deadline (D-048).
+The run is written to the database, which re-checks every match's arithmetic before accepting
+it as finished (D-012).
