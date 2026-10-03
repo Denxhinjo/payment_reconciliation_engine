@@ -505,6 +505,7 @@ exception and every row lands in exactly one.
    - Every sum agrees but some settlement row has no ledger row → **`missing_from_ledger`**,
      naming the row.
    - No bank entry, and `payout_date > period_to` (statement end) → **`timing`**.
+     *Superseded 2026-10-03 by D-048: the condition is now `payout_date + PAYOUT_WINDOW_DAYS > period_to`, and the explanation must state the deadline.*
    - No bank entry otherwise → **`missing_from_bank`**.
 2. **Remaining direct-transfer ledger rows**: if an unallocated bank entry carries the same
    reference with a different amount → **`amount_mismatch`** (both rows). Otherwise the
@@ -514,6 +515,7 @@ exception and every row lands in exactly one.
      **`possible_duplicate`**. The explanation cites the matched entry and its match.
    - Else if `booked_on + window > period_to` (the money could not have arrived inside the
      statement period) → **`timing`**.
+     *Refined 2026-10-03 by D-048: "window" is defined per row kind, and the explanation must state the deadline.*
    - Else → **`missing_from_bank`**.
 4. **Remaining bank entries**: `CRDT` → **`unknown_deposit`**; `DBIT` → **`unexplained_debit`**.
 

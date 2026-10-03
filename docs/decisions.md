@@ -412,7 +412,7 @@ which would have crashed the importer instead of rejecting the file.
 crash, and a camt.053 statement has no legitimate use for a DTD.
 
 ### Open item for stage 4: timing rule for payouts dated on the last days of the period
-**Status:** open, **needs owner decision before stage 4**
+**Status:** superseded by D-048 (owner decision, 2026-10-03); kept for history
 **Observation:** Design §5.7 classifies an unmatched payout group as `timing` only if
 `payout_date > period_to`. A payout dated on the last day of the month (or within
 `PAYOUT_WINDOW_DAYS` of it) that the bank books *after* the period would be labelled
@@ -423,3 +423,133 @@ period end. So the demo month is unaffected either way, but real data would hit 
 ledger rule. Trade-off: a payout that genuinely went missing in the last 3 days of a month is
 reported as `timing` first. It would surface as missing in the next period's run, which is
 period-close work outside Level 1.
+
+## Before stage 3, 2026-10-03
+
+### D-048: Timing rule uses the matching window, and every timing exception states its deadline
+**Status:** accepted (owner decision, 2026-10-03). **Supersedes** the payout timing condition
+in design §5.7 step 1 and the open item "timing rule for payouts dated on the last days of the
+period" above. Both are kept unedited for history.
+**Old rule:** an unmatched payout group with no bank entry is `timing` only if
+`payout_date > period_to`; otherwise `missing_from_bank`.
+**New rule:**
+- *Payout group with no bank entry:* `timing` if `payout_date + PAYOUT_WINDOW_DAYS > period_to`,
+  otherwise `missing_from_bank`. Deadline = `payout_date + PAYOUT_WINDOW_DAYS`.
+- *Direct-transfer ledger row with no bank entry:* `timing` if
+  `booked_on + EXACT_WINDOW_DAYS > period_to`. Deadline = `booked_on + EXACT_WINDOW_DAYS`.
+- *Card ledger row with no settlement line:* `timing` if
+  `booked_on + LEDGER_SETTLEMENT_WINDOW_DAYS > period_to`. Deadline = `booked_on +
+  LEDGER_SETTLEMENT_WINDOW_DAYS`. This defines the "window" that design §5.7 step 3 left
+  generic.
+- *Every* `timing` explanation states the source date, the window and the deadline, and what
+  to do after it, e.g. *"Payout PO-20260930 dated 30 Sep 2026; payout window 3 days; expected
+  at the bank by 3 Oct 2026; if not booked by then, treat as missing."*
+**Why:** under the old rule, a payout dated on the period's last day and booked by the bank one
+day later (inside the window) was labelled `missing_from_bank`, a false alarm on routine
+timing. The ledger-side rule already used the window, and the two now agree.
+**Trade-off, accepted:** a payout that genuinely goes missing within `PAYOUT_WINDOW_DAYS` of the
+period end is reported as `timing`, not `missing_from_bank`, in this period's run. The
+explicit deadline in the explanation is the mitigation: the reviewer is told the date after
+which "timing" is no longer a credible explanation. Following it up in the next period is
+period-close work, outside Level 1.
+**Rejected:** (a) Keeping the old rule: false alarms on routine month-end timing train
+reviewers to ignore `missing_from_bank`. (b) Waiting for the next period's statement before
+classifying: that needs cross-period state, which Level 1 does not have.
+**Tests committed for stage 4 (hand-built, not by regenerating the demo month):**
+(a) a payout dated on the statement's last day that the bank books after the period → `timing`,
+with its deadline in the explanation; (b) a payout dated within the window that never arrives
+→ also `timing`, with the explanation stating the deadline.
+
+### D-049: Incident: 12 role tests passed without testing anything
+**Status:** accepted (record of an incident found 2026-10-02; fix is D-039)
+**What passed vacuously:** the 12 stage-1 tests asserting that `recon_web` (7 statements) and
+`recon_worker` (5 statements) are refused by *privilege* (SQLSTATE 42501) when they try to
+change evidence.
+**Why:** each test ran `SET LOCAL ROLE <role>` *inside* the block that expected 42501. Locally
+and in CI the test connection is a superuser, so `SET ROLE` succeeded and the statement
+under test produced the 42501: the tests were valid there. On Neon the connection is
+`neondb_owner`, a non-superuser with CREATEROLE. Since PostgreSQL 16 a role's creator gets
+ADMIN on it but not the SET option, so `SET ROLE` itself failed with 42501, before the
+statement ran. The expected error arrived for the wrong reason and all 12 tests passed.
+**How it was caught:** not by those 12 tests. The one *positive* role test
+(`test_web_role_can_insert_a_resolution`) had no expected error to hide behind and failed
+with "permission denied to set role". Reading that failure showed that the negative tests
+shared the same `SET ROLE` and therefore could not have been testing anything. The catalog
+then confirmed the cause: the owner's membership in `recon_web` is admin=true, inherit=false,
+set=false.
+**What replaced them (D-039):** an exhaustive catalog test that compares each role's privileges
+on every table and view with an explicit expected matrix, needing no `SET ROLE`; plus two
+end-to-end tests whose `SET ROLE` happens in a fixture *outside* the asserted block, so a 42501
+can only come from the statement itself. The replacement was proven able to fail: an extra
+`GRANT UPDATE ON resolution TO recon_web` fails both.
+**Lesson applied going forward:** an expected-error assertion must contain only the statement
+under test. Setup that can fail with the same error belongs outside it.
+
+## Stage 3 (import), 2026-10-03
+
+### D-050: Non-EUR rows are rejected at import, in all three files
+**Status:** accepted (tightens design §3, which put the EUR check at run time for the CSVs)
+**Decision:** The ledger and settlement parsers reject any row whose currency is not EUR, as
+the bank parser already does (design §7.3). The whole file is rejected, naming the line.
+**Rejected:** Importing non-EUR rows and failing the run later. A file that Level 1 can never
+reconcile would sit in the database looking usable; rejecting at the door says why
+immediately, against the file that caused it.
+
+### D-051: The camt.053 parser reads structure first, then applies Level 1 rules
+**Status:** accepted
+**Decision:** `read_camt053` extracts the design §7.3 elements for any currency and any shape the
+official XSD allows, keeping amounts as the decimal text in the file. `apply_level1_rules` then
+enforces Level 1 (one statement, EUR, booked, no reversals, batch bookings, multi-transaction
+entries or per-entry charges, cent precision, balance tie-out) and only then converts amounts
+to minor units.
+**Why:** (1) The official ISO sample (S2) is in SEK and contains a batch-booked entry. The
+two-step split lets a test prove the parser reads the official sample's values correctly and
+also that Level 1 rejects it, for the right reason. (2) Converting text to minor units needs
+the currency's ISO 4217 exponent, and only EUR's is sourced (S6). Converting after the
+currency check means no unsourced exponent is ever used.
+**Rejected:** A single pass that rejects as it reads: it could not be tested against S2.
+
+### D-052: A rejected file is a recorded parse outcome, not a failed job
+**Status:** accepted
+**Decision:** When a parser rejects a file, the job is `done` and `import_parse` records
+`rejected` with the reason. The job is `failed` only for unexpected errors (database or
+infrastructure), which roll the parse back completely.
+**Rejected:** Marking the job failed on rejection: it would confuse "this file is wrong" (a
+business answer, final) with "the worker broke" (an operational problem, retryable).
+
+### D-053: Repeated `RmtInf/Ustrd` elements are joined with one space
+**Status:** accepted
+**Decision:** `Ustrd` is 0..n in the XSD. The parser stores them joined by a single space,
+and reference matching then compares that string exactly.
+**Rejected:** Keeping only the first occurrence, which would silently discard bank-supplied
+text. No generated file uses more than one, and the rule is recorded so that matching on
+real files is predictable.
+
+### D-054: Synthetic staff are seeded by a command, not by a migration
+**Status:** accepted
+**Decision:** `python -m recon seed-staff` creates "Demo Analyst 1", "Demo Analyst 2" and "Demo
+Controller" (`is_synthetic = true`), idempotently.
+**Rejected:** A seed migration: migrations define structure, and demo people would then exist
+in every database the schema is applied to.
+
+### D-055: CSV fields are stripped of surrounding whitespace; nothing else is normalised
+**Status:** accepted
+**Decision:** Leading and trailing whitespace is removed from every CSV field. Case, inner
+spacing and characters are kept as written.
+**Rejected:** (a) Rejecting files with padded fields, which is too brittle for spreadsheet
+exports while adding no safety. (b) Wider normalisation such as case-folding references,
+which would create matches the source data does not support.
+
+### D-056: Test transactions are opened explicitly, because psycopg commits idle blocks
+**Status:** accepted (found while writing the importer tests)
+**Finding:** In psycopg 3, `conn.transaction()` on an *idle* connection begins **and commits**
+a real transaction, even with autocommit off. The importer tests called the importer first
+thing, so its writes committed and leaked into later tests ("already exists" failures). The
+stage 1 tests were unaffected only because each happened to execute a plain statement first,
+which opened an implicit transaction.
+**Decision:** The `conn` fixture now runs a statement and asserts the connection is inside a
+transaction before yielding. A guard test asserts that, after the importer runs, the
+connection is still inside the uncommitted test transaction. With the fixture fix removed,
+that guard test fails (checked).
+**Rejected:** Relying on test order or on each test's first statement, which is what hid the
+problem in stage 1.

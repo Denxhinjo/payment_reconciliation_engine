@@ -33,7 +33,7 @@ exists to find real ones. See design §3 and decision D-001. Level 1 is EUR only
 
 ```
 db/migrations/      numbered raw-SQL migrations (no ORM)
-worker/recon/       Python worker: migration runner, synthetic generator; parsers and engine later
+worker/recon/       Python worker: migration runner, synthetic generator, parsers, importer; engine later
 worker/tests/       tests, run against real PostgreSQL
 demo-data/2026-09/  the synthetic demo month (generated, committed, byte-reproducible)
 docs/               design, decision log, sources
@@ -83,7 +83,7 @@ three files without reading `planted.json`, and requires the result to be exactl
 |---|---|
 | 1. Schema | done: migrations 0001–0006, migration runner, constraint tests |
 | 2. Generator | done: synthetic month, planted problems, official-XSD validation |
-| 3. Import | not started |
+| 3. Import | done: CSV and camt.053 parsers, idempotent import, parse jobs, `recon import` / `recon worker` |
 | 4. Matching passes | not started |
 | 5. Exceptions queue | not started |
 | 6. Replay test | not started |
@@ -114,3 +114,19 @@ DATABASE_URL="postgresql://..." .venv/Scripts/python -m recon migrate
 
 The runner refuses to run if an applied migration was edited or removed, or if the migrations
 directory contains anything unexpected (D-035).
+
+## Importing files
+
+```sh
+cd worker
+export DATABASE_URL="postgresql://..."
+.venv/Scripts/python -m recon seed-staff            # synthetic demo staff (D-054)
+.venv/Scripts/python -m recon import --kind ledger     --file ../demo-data/2026-09/synthetic_ledger_2026-09.csv
+.venv/Scripts/python -m recon import --kind settlement --file ../demo-data/2026-09/synthetic_orrery_settlement_2026-09.csv
+.venv/Scripts/python -m recon import --kind bank       --file ../demo-data/2026-09/synthetic_bank_camt053_2026-09.xml
+.venv/Scripts/python -m recon worker                # processes parse jobs queued by the web upload
+```
+
+Importing the same bytes again does nothing and reports the existing file. A file the parser
+rejects is kept as evidence, and its rejection reason is recorded; it can never be used in a
+reconciliation run.

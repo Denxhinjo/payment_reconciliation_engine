@@ -62,6 +62,12 @@ def validate(document: bytes) -> etree._Element:
     if root.getroottree().docinfo.doctype:
         raise Camt053Error("document declares a DTD (<!DOCTYPE ...>); refused")
     if root.tag != f"{{{NAMESPACE}}}Document":
+        namespace = root.tag[1:].split("}")[0] if root.tag.startswith("{") else ""
+        if namespace.startswith("urn:iso:std:iso:20022:tech:xsd:camt.053.001."):
+            raise Camt053Error(
+                f"{namespace.rsplit(':', 1)[-1]} is not supported; Level 1 accepts "
+                "camt.053.001.02 only (D-002)"
+            )
         raise Camt053Error(f"root element is {root.tag!r}, expected Document in {NAMESPACE}")
     xsd = schema()
     try:

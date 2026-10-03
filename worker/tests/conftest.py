@@ -71,8 +71,16 @@ def database_url() -> Iterator[str]:
 
 @pytest.fixture
 def conn(database_url: str) -> Iterator[psycopg.Connection]:
-    """A connection inside a transaction that is always rolled back."""
+    """A connection inside a transaction that is always rolled back.
+
+    The opening statement matters: in psycopg 3, ``conn.transaction()`` on an *idle*
+    connection begins and COMMITS a real transaction. Starting the outer transaction here makes
+    every ``conn.transaction()`` in code under test a savepoint inside it, so the final rollback
+    really discards everything (D-056).
+    """
     with psycopg.connect(database_url) as connection:
+        connection.execute("SELECT 1")
+        assert connection.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS
         try:
             yield connection
         finally:
