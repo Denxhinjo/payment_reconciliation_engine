@@ -58,7 +58,7 @@ WORKER_UPDATES = {"reconciliation_run", "job"}
 RUNNER_ONLY = {"schema_migration"}
 
 
-VIEWS = {"current_resolution", "exception_queue"}   # read-only for every role
+VIEWS = {"current_resolution", "exception_queue", "run_overview"}   # read-only for every role
 
 
 def _expected(role: str, relation: str) -> set[str]:

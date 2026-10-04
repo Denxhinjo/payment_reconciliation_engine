@@ -63,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
     reconcile_cmd.add_argument("--settlement-file", type=int, required=True, help="import_file id")
     reconcile_cmd.add_argument("--bank-file", type=int, required=True, help="import_file id")
 
+    replay_cmd = commands.add_parser(
+        "replay", help="recompute a finished run from its stored files and compare result hashes")
+    _database_argument(replay_cmd)
+    replay_cmd.add_argument("--run", type=int, required=True)
+
     queue_cmd = commands.add_parser("queue", help="list a run's exceptions")
     _database_argument(queue_cmd)
     queue_cmd.add_argument("--run", type=int, required=True)
@@ -141,14 +146,40 @@ def main(argv: list[str] | None = None) -> int:
             reconciled = []
             while (done := runs.process_reconcile_job(conn, engine_git_sha=git_sha)) is not None:
                 reconciled.append(done)
+            replayed = []
+            while (done := runs.process_replay_job(conn, engine_git_sha=git_sha)) is not None:
+                replayed.append(done)
         for o in outcomes:
             print(f"job #{o.job_id}: file #{o.file_id} {o.status}"
                   + (f" ({o.rows} rows)" if o.status == "parsed" else f": {o.error}"))
         for job_id, run in reconciled:
             print(f"job #{job_id}: run #{run.run_id} {run.status}"
                   + (f": {run.error}" if run.error else ""))
-        print(f"{len(outcomes)} parse job(s) and {len(reconciled)} reconcile job(s) processed")
+        for job_id, replay in replayed:
+            if isinstance(replay, str):
+                print(f"job #{job_id}: replay refused: {replay}")
+            else:
+                print(f"job #{job_id}: run #{replay.replay_run_id} replays run #{replay.original_run_id}: "
+                      + ("IDENTICAL" if replay.identical else "DIFFERENT"))
+        print(f"{len(outcomes)} parse job(s), {len(reconciled)} reconcile job(s) and "
+              f"{len(replayed)} replay job(s) processed")
         return 0
+
+    if args.command == "replay":
+        with _connect(parser, args.database_url) as conn:
+            try:
+                replay = runs.replay(conn, args.run, engine_git_sha=git_sha)
+            except runs.ReplayRefused as exc:
+                print(f"replay refused: {exc}", file=sys.stderr)
+                return 1
+        print(f"run #{replay.replay_run_id} replays run #{replay.original_run_id}")
+        print(f"  original result sha256 {replay.original_sha256}")
+        print(f"  replay   result sha256 {replay.replay_sha256 or '(none: ' + str(replay.error) + ')'}")
+        if replay.identical:
+            print("  IDENTICAL: the run was reproduced byte for byte")
+            return 0
+        print("  DIFFERENT: the replay did not reproduce the original result", file=sys.stderr)
+        return 1
 
     if args.command == "reconcile":
         with _connect(parser, args.database_url) as conn:

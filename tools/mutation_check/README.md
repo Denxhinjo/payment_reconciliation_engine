@@ -70,3 +70,28 @@ mutation can never silently apply somewhere unintended.
 
 When the engine changes, an anchor may stop matching (exit 2). Update the mutation to break
 the same rule in the new code, and keep the list covering every matching rule.
+
+## Recorded runs
+
+| Date | Commit | Mutations | Result |
+|---|---|---|---|
+| 2026-10-03 | `f27bd12` (stage 5) | all 18, from `tools/mutation_check/`, unattended | **all 18 caught**, `{"mutations": 18, "survived": []}`, exit 0; baseline 390 passed |
+
+Notes on the 2026-10-03 run:
+
+- Every mutation failed at least one test about the rule it changed. Counts of failed tests:
+  M01 3, M02 2, M03 3, M04 5, M05 3, M06 4, M07 2, M08 1, M09 2, M10 3, M11 1, M12 8, M13 2,
+  M14 2, M15 3, M16 2, M17 2, M18 1.
+- **M04 and M12 also produced 19 test *errors*.** These are the exceptions-queue tests
+  (`test_exceptions_queue.py`), whose fixture finds the demo exceptions by their suggested
+  reason; relabelling a duplicate or a deposit makes that lookup fail during setup. They are
+  collateral, not extra catches. The tool version used for this run listed only `FAILED` tests
+  and did not report `ERROR`s. From the next commit on it reports both (see "Reading the
+  output").
+
+## Reading the output
+
+Each mutation's line ends with pytest's own summary (`N failed, M passed, K errors`). The tests
+listed under it are those that **failed** or **errored**, marked `[failed]` or `[error]`. An
+error during setup still means the suite did not pass, so the mutation counts as caught. The
+`[failed]` lines show which assertions noticed the broken rule.

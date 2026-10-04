@@ -176,3 +176,88 @@ def process_reconcile_job(conn: psycopg.Connection, job_id: int | None = None,
             "UPDATE job SET status = 'done', finished_at = now(), run_id = %s WHERE id = %s",
             (outcome.run_id, job_id))
     return job_id, outcome
+
+
+# --- replay (design §6) ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ReplayOutcome:
+    original_run_id: int
+    replay_run_id: int
+    status: str                 # status of the replay run: 'finished' or 'failed'
+    identical: bool             # replay finished and its result hash equals the original's
+    original_sha256: str
+    replay_sha256: str | None
+    error: str | None
+
+
+class ReplayRefused(Exception):
+    """The run cannot be replayed by this engine; nothing was recorded."""
+
+
+def replay(conn: psycopg.Connection, run_id: int, *,
+           engine_git_sha: str | None = None) -> ReplayOutcome:
+    """Recompute a finished run from its stored raw files and compare result hashes.
+
+    The replay is recorded as a new run with ``replay_of_run_id``. A different result is
+    *recorded*, not refused: a mismatch is evidence (design §4.3). A run made by another engine
+    version is refused, because only that version's code can reproduce it.
+    """
+    row = conn.execute(
+        "SELECT engine_version, status, ledger_file_id, settlement_file_id, bank_file_id, "
+        "encode(result_sha256, 'hex') FROM reconciliation_run WHERE id = %s",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise ReplayRefused(f"no run with id {run_id}")
+    engine_version, status, ledger_file, settlement_file, bank_file, original_sha = row
+    if status != "finished":
+        raise ReplayRefused(f"run {run_id} is {status}; only finished runs have a result to reproduce")
+    if engine_version != ENGINE_VERSION:
+        raise ReplayRefused(
+            f"run {run_id} was computed by engine {engine_version}, but this is engine "
+            f"{ENGINE_VERSION}. Check out git tag engine-v{engine_version} and replay from there."
+        )
+    outcome = create_and_run(conn, ledger_file, settlement_file, bank_file,
+                             replay_of_run_id=run_id, engine_git_sha=engine_git_sha)
+    return ReplayOutcome(
+        original_run_id=run_id,
+        replay_run_id=outcome.run_id,
+        status=outcome.status,
+        identical=outcome.status == "finished" and outcome.result_sha256 == original_sha,
+        original_sha256=original_sha,
+        replay_sha256=outcome.result_sha256,
+        error=outcome.error,
+    )
+
+
+def process_replay_job(conn: psycopg.Connection, job_id: int | None = None,
+                       engine_git_sha: str | None = None) -> tuple[int, ReplayOutcome | str] | None:
+    """Claim one queued replay job. The job is 'done' with the replay run, or 'failed' with the
+    refusal reason if the run cannot be replayed by this engine."""
+    with conn.transaction():
+        row = conn.execute(
+            "SELECT id, replay_of_run_id FROM job "
+            "WHERE kind = 'replay' AND status = 'queued' AND (%s::bigint IS NULL OR id = %s) "
+            "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
+            (job_id, job_id),
+        ).fetchone()
+        if row is None:
+            return None
+        job_id, original = row
+        conn.execute(
+            "UPDATE job SET status = 'running', attempts = attempts + 1, started_at = now() "
+            "WHERE id = %s", (job_id,))
+    try:
+        outcome = replay(conn, original, engine_git_sha=engine_git_sha)
+    except ReplayRefused as refusal:
+        with conn.transaction():
+            conn.execute(
+                "UPDATE job SET status = 'failed', finished_at = now(), error = %s WHERE id = %s",
+                (str(refusal), job_id))
+        return job_id, str(refusal)
+    with conn.transaction():
+        conn.execute(
+            "UPDATE job SET status = 'done', finished_at = now(), run_id = %s WHERE id = %s",
+            (outcome.replay_run_id, job_id))
+    return job_id, outcome

@@ -238,7 +238,7 @@ def test_cli_seed_import_reimport_and_worker(capsys):
         assert "already imported as file #1 (ledger); nothing done" in capsys.readouterr().out
 
         assert main(["worker", "--database-url", url]) == 0
-        assert "0 parse job(s) and 0 reconcile job(s) processed" in capsys.readouterr().out
+        assert "0 parse job(s), 0 reconcile job(s) and 0 replay job(s) processed" in capsys.readouterr().out
 
         with psycopg.connect(url) as conn:
             assert conn.execute("SELECT count(*) FROM import_file").fetchone() == (3,)

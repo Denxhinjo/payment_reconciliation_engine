@@ -102,10 +102,12 @@ MUTATIONS = {
 
 def run_suite(copy: Path) -> tuple[list[str], str]:
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-rf", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", "-q", "-rfE", "-p", "no:cacheprovider"],
         cwd=copy / "worker", capture_output=True, text=True, timeout=3600,
     )
-    failed = sorted(set(re.findall(r"^FAILED (\S+)", proc.stdout, re.M)))
+    # Both outcomes mean the suite did not pass: an assertion failed, or setup broke.
+    failed = sorted({f"[failed] {t}" for t in re.findall(r"^FAILED (\S+)", proc.stdout, re.M)}
+                    | {f"[error] {t}" for t in re.findall(r"^ERROR (\S+)", proc.stdout, re.M)})
     lines = proc.stdout.strip().splitlines()
     summary = lines[-1] if lines else proc.stderr.strip()[-500:]
     if proc.returncode not in (0, 1):   # 0 all passed, 1 some failed; anything else is an error
@@ -158,7 +160,8 @@ def main(selected: list[str]) -> int:
             report[name] = failed
             print(f"{name}: {summary}" + ("" if failed else "   <-- SURVIVED"), flush=True)
             for test in failed:
-                print(f"    {test.split('::', 1)[-1]}", flush=True)
+                marker, name = test.split(" ", 1)
+                print(f"    {marker} {name.split('::', 1)[-1]}", flush=True)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

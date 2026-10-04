@@ -1,0 +1,6 @@
+{
+  "1.0.0": {
+    "demo-data/2026-09 (seed 20260901)": "4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7"
+  },
+  "_about": "Golden result hashes: SHA-256 of the engine's canonical result for the committed demo month, per ENGINE_VERSION (design section 6, D-069). If a change alters this hash, it changed matching behaviour: bump ENGINE_VERSION and add a new entry. Never edit an existing entry; it is what lets an old run be replayed from its engine tag."
+}

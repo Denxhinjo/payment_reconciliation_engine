@@ -87,7 +87,7 @@ three files without reading `planted.json`, and requires the result to be exactl
 | 3. Import | done: CSV and camt.053 parsers, idempotent import, parse jobs, `recon import` / `recon worker` |
 | 4. Matching passes | done: exact, gross_net, many_to_one, classification with timing deadlines; runs persisted and re-verified by the database |
 | 5. Exceptions queue | done: queue view, evidence, resolve and correct (append-only), races decided by the database |
-| 6. Replay test | not started |
+| 6. Replay test | done: `recon replay`, golden hash per engine version, static purity check, cross-process determinism |
 | 7. Web UI | not started |
 
 ## Running the tests
@@ -162,3 +162,23 @@ are never edited or deleted: a correction is a new resolution that supersedes th
 and the full history stays visible. The database enforces all of this (D-019, D-020, D-066).
 If two people act on the same exception at once, the database lets exactly one through and the
 other is told who got there first.
+
+## Replaying a run
+
+The headline property: a disputed month can be recomputed exactly, months later.
+
+```sh
+cd worker
+.venv/Scripts/python -m recon replay --run 1
+# run #2 replays run #1
+#   original result sha256 4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7
+#   replay   result sha256 4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7
+#   IDENTICAL: the run was reproduced byte for byte
+```
+
+The engine is a pure function of the three stored raw files and its version. It never reads the
+database, the clock, randomness, the environment or the locale, and a test checks that
+statically. The demo month's result hash is pinned per engine version in
+`worker/tests/golden/results.json`. A run made by an older engine is replayed by checking out
+that version's tag (`git checkout engine-v1.0.0`). A replay that does not reproduce the
+original is recorded and shown as such in `run_overview`, never hidden (D-068 to D-070).

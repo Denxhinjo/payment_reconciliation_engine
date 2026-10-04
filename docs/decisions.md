@@ -698,3 +698,49 @@ a non-existent exception arrived as "run missing / not finished". The translatio
 case it is and says "no exception with id N".
 **Rejected:** Mirroring the rules in Python for nicer messages: two copies of a rule drift, and
 the database copy is the one that is enforced.
+
+## Stage 6 (deterministic replay), 2026-10-04
+
+Before this stage, the full mutation check was run once, unattended, from its committed location
+(`tools/mutation_check/`, commit `f27bd12`): all 18 mutations caught. The run showed that the tool
+listed failed tests but not *errored* ones (M04 and M12 also errored 19 queue tests at setup).
+The tool now reports both, marked `[failed]` / `[error]`; re-run on M12, it listed 8 failures and
+19 errors. Recorded in `tools/mutation_check/README.md`.
+
+### D-068: Replay is recorded as a linked run; the overview shows whether it reproduced
+**Status:** accepted
+**Decision:** `recon replay --run N` recomputes run N from its stored raw files and records a
+new run with `replay_of_run_id = N`. Migration 0008 adds the read-only `run_overview` view: per
+run, the input file hashes, the result hash, counts, and `replay_identical` (NULL for an
+original; true only if the replay finished with the same result hash). A replay of a run made
+by another engine version is refused, naming the git tag to check out (`engine-vX.Y.Z`).
+Replay jobs (job kind `replay`) are processed by the worker; a refused replay fails the job
+with the reason.
+**Rejected:** (a) Comparing in memory and discarding the replay: the comparison itself would
+leave no evidence. (b) Refusing to record a differing replay: a mismatch is exactly what an
+auditor needs to see (design §4.3).
+
+### D-069: Golden result hashes are append-only, one per engine version
+**Status:** accepted
+**Decision:** `worker/tests/golden/results.json` holds the demo month's result hash per
+`ENGINE_VERSION` (1.0.0: `4962e880…67c7`). A test fails if the current engine's result differs
+from its version's entry, or if the version has no entry. A behaviour change therefore requires
+a version bump and a *new* entry. Existing entries are never edited, because each one is what
+an old run must reproduce when replayed from its tag. Each engine version is tagged in git
+(`engine-v1.0.0` on the stage 6 commit).
+**Rejected:** Regenerating the golden file whenever it fails, which would turn the test into a
+formality.
+
+### D-070: Engine purity is checked statically, including what the engine imports
+**Status:** accepted (implements design §6 "forbidden imports")
+**Decision:** A test walks the syntax tree of the engine and every module it executes (`engine`,
+`money`, `camt053`, `parse.*`). It fails on any import of time, random, uuid, secrets, os, sys,
+locale, network, threading or process modules; any `.now`, `.today`, `.utcnow`,
+`.fromtimestamp`, `environ`, `getenv` or locale access; and calls to `hash`, `id`, `open`,
+`input`, `eval`, `exec`. A second test fails if any of those modules imports a `recon`
+module outside the checked set, so impurity cannot enter through an unchecked dependency.
+A third test feeds the checker each forbidden construct to prove it can fail.
+**Allowed, deliberately:** `camt053` reads the official XSD from the repository through
+`pathlib`. Its bytes are pinned by SHA-256 (D-003), so this read cannot vary the output.
+**Complemented by:** five fresh interpreters with different `PYTHONHASHSEED`, `TZ` and locale
+settings must each produce the golden bytes.
