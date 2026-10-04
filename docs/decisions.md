@@ -744,3 +744,44 @@ A third test feeds the checker each forbidden construct to prove it can fail.
 `pathlib`. Its bytes are pinned by SHA-256 (D-003), so this read cannot vary the output.
 **Complemented by:** five fresh interpreters with different `PYTHONHASHSEED`, `TZ` and locale
 settings must each produce the golden bytes.
+
+## Before stage 7, 2026-10-04
+
+### D-071: Determinism subprocesses prove their environment is in effect, or do not count
+**Status:** accepted (owner correction to stage 6)
+**Finding:** two of the five fresh-interpreter cases were claiming coverage they did not have.
+(1) Python does not apply `LC_ALL` to date formatting unless the program calls `setlocale`,
+so the "German locale" subprocess never formatted anything in German, on any platform.
+(2) Windows does not understand IANA names in `TZ`: locally, both time-zone cases ran with a UTC
+offset of 0. The stage 6 report called the possibly-missing locale "harmless". It was the same
+pattern as the mutation tool ignoring errored tests: a green tick for a check that did not run.
+**Decision:** each subprocess applies the requested locale and time zone itself, then reports
+what is in effect: the month name `strftime` produces ("Okt" proves German), and the UTC offset
+its local clock produces (+50 400 s Kiritimati; −36 000 s Adak in January). If a requested
+setting is not in effect, the test **skips with the exact reason**. With
+`RECON_TEST_REQUIRE_ENVIRONMENTS=1`, which CI sets, it **fails** instead. CI generates the
+`de_DE.UTF-8` locale before testing. A separate test proves the hash seeds really change string
+hashing. The classification function is tested on both branches (all in effect; locale missing;
+locale set but not applied; time zone not applied) independently of the machine.
+**Rejected:** failing everywhere when an environment is missing, which would make the suite
+unrunnable on a Windows laptop. Skipping silently is not an option at all.
+
+### D-072: Money representation verified; carried weaknesses get one list
+**Status:** accepted
+**Verified (2026-10-04):** the engine's money path is integer minor units end to end.
+- CSV amounts: `strict_int`, `^-?[0-9]+$` then `int()`.
+- Bank amounts: `to_minor`, decimal text converted by string arithmetic.
+- Matching: integer equality. Totals: `sum()` of ints.
+- Result: canonical JSON of ints and strings; floats refused.
+- Database: `bigint`.
+
+A static scan of all engine modules found no float literal, `float()`, `round()`, `Decimal` or
+true division; the only `/` operators are `pathlib` joins in `camt053.py`. A runtime check on
+the demo month found only `int` amounts and only `dict`, `list`, `int` and `str` values in the
+hashed result. Determinism therefore holds by construction; the Windows→Linux golden match
+confirms it.
+**Decision:** carried weaknesses are listed in `docs/known-fragilities.md` (F1–F17). Each entry
+states why it is acceptable now and what would make it stop being acceptable. A weakness may
+not appear as "noticed, not done" in a stage report without an entry there. A gap found during
+this check (no static guard against intermediate floats) is F14, recorded rather than fixed,
+per the stage's scope rule.

@@ -138,30 +138,124 @@ def test_the_result_contains_no_wall_clock_or_environment_fields():
 
 # --- fresh interpreters with different hash seeds, time zones and locales -------------------------
 
+# Each subprocess *applies* the requested locale and time zone itself, then reports what is
+# actually in effect, before running the engine. A request that did not take effect is never
+# counted as coverage (D-071):
+# - Python does not apply LC_ALL to date formatting unless the program calls setlocale, so the
+#   script calls it and reports the month name strftime then produces ("Okt" proves German).
+# - Windows does not understand IANA names in TZ, and a missing zone file falls back to UTC
+#   silently on Linux, so the script reports the UTC offset its local clock actually produces.
+# If a requested setting is not in effect, the test SKIPS with the exact reason. With
+# RECON_REQUIRE_TEST_ENVIRONMENTS=1 (set in CI) it FAILS instead, so CI cannot pass on a check
+# that did not run.
+
 SCRIPT = """
-import hashlib, pathlib
+import hashlib, json, locale, os, pathlib, time
+report = {{}}
+requested_locale = os.environ.get("RECON_TEST_LOCALE")
+if requested_locale:
+    try:
+        locale.setlocale(locale.LC_ALL, requested_locale)
+        report["locale"] = locale.setlocale(locale.LC_ALL)
+        report["october"] = time.strftime("%b", (2026, 10, 1, 0, 0, 0, 3, 274, -1))
+    except locale.Error as exc:
+        report["locale_error"] = str(exc)
+if os.environ.get("TZ"):
+    if hasattr(time, "tzset"):
+        time.tzset()
+    report["utc_offset_seconds"] = time.localtime(1767225600).tm_gmtoff   # 2026-01-01T00:00Z
 from recon.engine import reconcile
 d = pathlib.Path(r"{demo}")
 files = [(d / n).read_bytes() for n in ("synthetic_ledger_2026-09.csv",
          "synthetic_orrery_settlement_2026-09.csv", "synthetic_bank_camt053_2026-09.xml")]
-print(hashlib.sha256(reconcile(*files)).hexdigest())
+report["sha256"] = hashlib.sha256(reconcile(*files)).hexdigest()
+print(json.dumps(report))
 """
 
+GERMAN = "de-DE" if sys.platform == "win32" else "de_DE.UTF-8"
 
-@pytest.mark.parametrize("environment", [
-    {"PYTHONHASHSEED": "0"},
-    {"PYTHONHASHSEED": "4242"},
-    {"PYTHONHASHSEED": "random"},
-    {"PYTHONHASHSEED": "1", "TZ": "Pacific/Kiritimati", "LC_ALL": "de_DE.UTF-8", "LANG": "de_DE.UTF-8"},
-    {"PYTHONHASHSEED": "2", "TZ": "America/Adak", "LC_ALL": "C", "LANG": "C"},
-], ids=["seed-0", "seed-4242", "seed-random", "kiritimati-de", "adak-c"])
-def test_a_fresh_interpreter_reproduces_the_golden_bytes(environment):
-    env = dict(os.environ, **environment)
+# id -> (environment, what must be in effect inside the subprocess)
+ENVIRONMENTS = {
+    "seed-0": ({"PYTHONHASHSEED": "0"}, {}),
+    "seed-4242": ({"PYTHONHASHSEED": "4242"}, {}),
+    "seed-random": ({"PYTHONHASHSEED": "random"}, {}),
+    "kiritimati-german": (
+        {"PYTHONHASHSEED": "1", "TZ": "Pacific/Kiritimati", "RECON_TEST_LOCALE": GERMAN},
+        {"utc_offset_seconds": 14 * 3600, "october": "Okt"}),
+    "adak-c-locale": (
+        {"PYTHONHASHSEED": "2", "TZ": "America/Adak", "RECON_TEST_LOCALE": "C"},
+        {"utc_offset_seconds": -10 * 3600, "october": "Oct"}),
+}
+
+
+def environment_gaps(environment: dict, expected: dict, report: dict) -> list[str]:
+    """Requested settings that were NOT in effect inside the subprocess, in plain words."""
+    gaps = []
+    if "locale_error" in report:
+        gaps.append(f"locale {environment.get('RECON_TEST_LOCALE')!r} is not available here "
+                    f"({report['locale_error']})")
+    elif "october" in expected and report.get("october") != expected["october"]:
+        gaps.append(f"locale {environment.get('RECON_TEST_LOCALE')!r} was set but not in effect: "
+                    f"October formats as {report.get('october')!r}, expected {expected['october']!r}")
+    if "utc_offset_seconds" in expected and report.get("utc_offset_seconds") != expected["utc_offset_seconds"]:
+        gaps.append(f"time zone TZ={environment.get('TZ')!r} is not in effect here: local UTC offset "
+                    f"is {report.get('utc_offset_seconds')} s, expected {expected['utc_offset_seconds']} s")
+    return gaps
+
+
+def _run_script(environment: dict) -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in ("TZ", "LC_ALL", "LANG", "RECON_TEST_LOCALE")}
+    env.update(environment)
     proc = subprocess.run([sys.executable, "-c", SCRIPT.format(demo=DEMO)], cwd=WORKER, env=env,
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    (expected,) = GOLDEN[ENGINE_VERSION].values()
-    assert proc.stdout.strip() == expected
+    return json.loads(proc.stdout)
+
+
+@pytest.mark.parametrize("name", sorted(ENVIRONMENTS))
+def test_a_fresh_interpreter_reproduces_the_golden_bytes(name):
+    environment, expected = ENVIRONMENTS[name]
+    report = _run_script(environment)
+    gaps = environment_gaps(environment, expected, report)
+    if gaps:
+        message = f"{name}: requested environment not in effect: " + "; ".join(gaps)
+        if os.environ.get("RECON_TEST_REQUIRE_ENVIRONMENTS") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+    (golden,) = GOLDEN[ENGINE_VERSION].values()
+    assert report["sha256"] == golden
+
+
+def test_hash_seeds_really_change_string_hashing():
+    """Proves PYTHONHASHSEED took effect, so the seed cases are three different interpreters."""
+    script = "print(hash('recon'))"
+
+    def hashed(seed):
+        env = dict(os.environ, PYTHONHASHSEED=seed)
+        return subprocess.run([sys.executable, "-c", script], env=env, capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    assert hashed("0") == hashed("0")
+    assert hashed("0") != hashed("4242")
+
+
+# The classification itself, on both branches, independent of what this machine provides.
+
+def test_environment_gaps_reports_nothing_when_everything_is_in_effect():
+    environment, expected = ENVIRONMENTS["kiritimati-german"]
+    report = {"locale": "de_DE.UTF-8", "october": "Okt", "utc_offset_seconds": 50400, "sha256": "x"}
+    assert environment_gaps(environment, expected, report) == []
+
+
+@pytest.mark.parametrize("report, fragment", [
+    ({"locale_error": "unsupported locale setting", "utc_offset_seconds": 50400}, "is not available here"),
+    ({"locale": "C", "october": "Oct", "utc_offset_seconds": 50400}, "was set but not in effect"),
+    ({"locale": "de_DE.UTF-8", "october": "Okt", "utc_offset_seconds": 0}, "is not in effect here"),
+], ids=["locale-missing", "locale-not-applied", "time-zone-not-applied"])
+def test_environment_gaps_names_each_kind_of_missing_environment(report, fragment):
+    environment, expected = ENVIRONMENTS["kiritimati-german"]
+    gaps = environment_gaps(environment, expected, report)
+    assert len(gaps) == 1 and fragment in gaps[0]
 
 
 def test_in_process_repeat_is_byte_identical():
