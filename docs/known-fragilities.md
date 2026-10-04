@@ -13,7 +13,6 @@ stage reports.
 | # | Fragility | Area |
 |---|---|---|
 | F1 | Exceptions-queue tests find exceptions by suggested reason | tests |
-| F2 | No command or UI to requeue a failed job | operations |
 | F3 | Bank remittance text must match references exactly | matching |
 | F4 | The parser has no file-size limit of its own | import |
 | F5 | Resolutions do not carry over to a later run of the same files | exceptions |
@@ -29,6 +28,12 @@ stage reports.
 | F15 | `engine_git_sha` is only recorded when `GITHUB_SHA` is set | provenance |
 | F16 | The generator's planted-problem rules are only verified for September 2026 | demo data |
 | F17 | The mutation check (30+ min) is a manual reviewer tool, not a CI gate | tests |
+| F18 | Flash messages travel in the URL and can be crafted | web |
+| F19 | A job whose worker dies stays `running`; nothing reclaims it | operations |
+| F20 | No action grants a job a fresh attempt budget | operations |
+| F21 | Web end-to-end tests share one server and database across files | tests |
+| F22 | Sign-out is not origin-checked | web |
+| F23 | Upload size is checked after the body has been read | web |
 
 ---
 
@@ -41,13 +46,6 @@ relabel cannot go unnoticed. Since stage 6 the mutation tool reports errors as w
 **Stops being acceptable when:** a queue test is ever the *only* thing that would catch a
 regression. Then it must locate exceptions by their evidence rows (entry ids, payout ids), so it
 fails with a message instead of erroring.
-
-### F2: No command or UI to requeue a failed job
-**What:** a job that fails stays failed (noticed in stage 3).
-**Why acceptable now:** failures are recorded with their reason, nothing retries silently, and
-the owner deferred requeueing to the UI in stage 7.
-**Stops being acceptable when:** stage 7 ships. **Being addressed in stage 7.** Requeue must be
-idempotent and must preserve `attempts` (poison-pill protection).
 
 ### F3: Bank remittance text must match references exactly
 **What:** direct transfers match on `RmtInf/Ustrd` equal to the ledger reference after trimming
@@ -166,8 +164,65 @@ recorded.
 **Stops being acceptable when:** `engine.py` changes. The tool must be re-run before the change
 is merged and the result recorded in its README.
 
+### F18: Flash messages travel in the URL and can be crafted
+**What:** after a form POST the app redirects with `?notice=` or `?error=` text, which the page
+displays. Anyone can craft a link that shows arbitrary text inside the banner area of a real page.
+**Why acceptable now:** React escapes it, so there is no script injection; the text cannot change
+any data; this is a demo with public synthetic accounts.
+**Stops being acceptable when:** real users rely on these messages. Then use message codes
+looked up server-side, or a one-time flash cookie.
+*Noticed in stage 7, not fixed (scope rule).*
+
+### F19: A job whose worker dies stays `running`; nothing reclaims it
+**What:** `attempts` is incremented at claim time so that a crashed attempt still counts, but no
+process returns a stale `running` job to the queue or marks it failed. A worker killed mid-job
+leaves its job `running` forever, and requeue (failed jobs only) cannot touch it.
+**Why acceptable now:** the demo worker is run on demand. A crash is visible on the Jobs page as
+a job stuck in `running`.
+**Stops being acceptable when:** the worker runs unattended (the GitHub Actions schedule). It
+then needs a lease (e.g. `started_at` older than N minutes) after which the job is marked
+`failed` with "worker lost", keeping its attempts, so it can be requeued within its budget.
+*Noticed in stage 7, not fixed (scope rule).*
+
+### F20: No action grants a job a fresh attempt budget
+**What:** a job at `recon_max_job_attempts()` (3) can never run again. By owner direction, a
+fresh budget must be a distinct, explicitly named action, never a side effect of requeue. That
+action does not exist.
+**Why acceptable now:** the remedy for a job that failed three times is to fix the cause and
+submit the work again (re-upload, or request a new reconciliation), which creates a new job.
+**Stops being acceptable when:** an operator needs to retry the *same* job after a fix. Then add
+`grant_fresh_attempts(job, staff, reason)`: controller only, with a mandatory reason, logged.
+
+### F21: Web end-to-end tests share one server and database across files
+**What:** `test_web_auth.py` and `test_web_flows.py` use one session-scoped server and database,
+so one file's actions (e.g. a requeue) are visible to the other.
+**Why acceptable now:** assertions are written relative to state captured before the action
+(counts and rows before/after), and the suite passes in both file orders (checked).
+**Stops being acceptable when:** a test has to assert absolute state. Give it its own seeded
+database and server.
+
+### F22: Sign-out is not origin-checked
+**What:** `POST /api/session/end` clears the cookie without checking the Origin header, so a
+cross-site page could sign a user out.
+**Why acceptable now:** logging someone out exposes nothing and changes no data. SameSite=Lax
+already stops cross-site POSTs from carrying the cookie for every action that matters.
+**Stops being acceptable when:** sign-out does anything beyond clearing the cookie (e.g. revokes
+server-side sessions).
+
+### F23: Upload size is checked after the body has been read
+**What:** `/api/upload` reads the whole multipart body and then refuses anything over 4 MiB. The
+database enforces the same limit. A client can still make the server read a large body.
+**Why acceptable now:** the route requires a signed-in session (an anonymous request gets 401
+before the body is read), and the demo has no untrusted signed-in users.
+**Stops being acceptable when:** the app is exposed to untrusted signed-in users. Then cap the
+request size at the platform or proxy, or check `Content-Length` first.
+
 ---
 
 ## Closed
 
-*(none yet)*
+### F2: No command or UI to requeue a failed job (closed in stage 7)
+Closed by the stage 7 commit. Requeue is the database function `requeue_failed_job()` (D-074):
+controller only, idempotent, preserves `attempts`, refuses a job at its budget, and logs every
+requeue in the append-only `job_requeue`. It is exposed on the Jobs page and tested directly
+over HTTP and in the database.

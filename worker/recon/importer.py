@@ -26,8 +26,9 @@ from recon.parse.csvfiles import parse_ledger, parse_settlement
 
 FILE_KINDS = ("ledger", "settlement", "bank")
 
-# Synthetic staff for the demo (D-031, D-054). Clearly not real people.
+# Synthetic staff for the demo (D-031, D-054, D-073). Clearly not real people.
 SYNTHETIC_STAFF = ("Demo Analyst 1", "Demo Analyst 2", "Demo Controller")
+STAFF_ROLES = {"Demo Analyst 1": "analyst", "Demo Analyst 2": "analyst", "Demo Controller": "controller"}
 
 
 @dataclass(frozen=True)
@@ -51,9 +52,9 @@ def seed_synthetic_staff(conn: psycopg.Connection) -> list[int]:
     with conn.transaction():
         for name in SYNTHETIC_STAFF:
             conn.execute(
-                "INSERT INTO staff_user (display_name, is_synthetic) VALUES (%s, true) "
+                "INSERT INTO staff_user (display_name, is_synthetic, role) VALUES (%s, true, %s) "
                 "ON CONFLICT (display_name) DO NOTHING",
-                (name,),
+                (name, STAFF_ROLES[name]),
             )
         return [row[0] for row in conn.execute(
             "SELECT id FROM staff_user WHERE display_name = ANY(%s) ORDER BY id",
@@ -148,7 +149,7 @@ def _claim(conn: psycopg.Connection, job_id: int | None) -> tuple[int, int] | No
     with conn.transaction():
         row = conn.execute(
             "SELECT id, import_file_id FROM job "
-            "WHERE kind = 'parse_file' AND status = 'queued' AND (%s::bigint IS NULL OR id = %s) "
+            "WHERE kind = 'parse_file' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
             "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
             (job_id, job_id),
         ).fetchone()

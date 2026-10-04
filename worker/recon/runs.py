@@ -153,7 +153,7 @@ def process_reconcile_job(conn: psycopg.Connection, job_id: int | None = None,
     with conn.transaction():
         row = conn.execute(
             "SELECT id, ledger_file_id, settlement_file_id, bank_file_id FROM job "
-            "WHERE kind = 'reconcile' AND status = 'queued' AND (%s::bigint IS NULL OR id = %s) "
+            "WHERE kind = 'reconcile' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
             "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
             (job_id, job_id),
         ).fetchone()
@@ -238,7 +238,7 @@ def process_replay_job(conn: psycopg.Connection, job_id: int | None = None,
     with conn.transaction():
         row = conn.execute(
             "SELECT id, replay_of_run_id FROM job "
-            "WHERE kind = 'replay' AND status = 'queued' AND (%s::bigint IS NULL OR id = %s) "
+            "WHERE kind = 'replay' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
             "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
             (job_id, job_id),
         ).fetchone()

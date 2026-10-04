@@ -785,3 +785,117 @@ states why it is acceptable now and what would make it stop being acceptable. A 
 not appear as "noticed, not done" in a stage report without an entry there. A gap found during
 this check (no static guard against intermediate floats) is F14, recorded rather than fixed,
 per the stage's scope rule.
+
+## Stage 7 (web UI), 2026-10-04
+
+### D-073: Two staff roles, analyst and controller
+**Status:** accepted
+**Decision:** `staff_user.role` is `analyst` or `controller` (migration 0009). Both can upload,
+request reconciliations and replays, and resolve or correct exceptions; only a controller can
+requeue failed jobs. The seeded synthetic staff are two analysts and one controller.
+**Why:** server-side authorisation needs a real boundary to enforce and to test, beyond
+signed-in versus anonymous. Requeue is the operational action with consequences for the
+poison-pill budget, so it sits with the controller.
+**Rejected:** making corrections controller-only, which would change the stage 5 semantics.
+Separation of duties belongs with real authentication (F6).
+
+### D-074: Requeue is one database function; attempts are never reset
+**Status:** accepted (owner principle)
+**Decision:** `requeue_failed_job(job, staff)` is SECURITY DEFINER, executable only by `recon_web`.
+It raises RC005 for anyone but a controller, locks the job row, and returns `requeued`,
+`already_queued`, `not_failed`, `attempts_exhausted` or `not_found`. It is idempotent: a second
+call sees `queued` and changes nothing. It never touches `attempts`. It moves the job's error
+into the append-only `job_requeue` log (who, when, attempts then, error replaced).
+`recon_max_job_attempts()` (3) is the single definition of the budget, used by the function and
+by every worker claim (`attempts < recon_max_job_attempts()`), so a poison pill is never claimed
+again. A fresh budget is deliberately *not* a side effect of requeue; no such action exists
+yet (F20).
+**Rejected:** (a) granting the web role UPDATE on `job`: it could then set any status or zero
+`attempts`. (b) Requeue by inserting a copy of the job: that starts the copy at zero attempts,
+which is exactly the reset the principle forbids.
+**Tested:** twice gives one job and one log row; attempts 2 stays 2; budget reached gives
+`attempts_exhausted`; analyst gives RC005 in the database and 403 over HTTP; five simultaneous
+requeues give one `requeued` and four `already_queued`.
+
+### D-075: A double-submitted request creates one job
+**Status:** accepted
+**Decision:** partial unique indexes allow at most one *active* (queued or running) replay job
+per run, and one active reconcile job per (ledger, settlement, bank) triple. The web inserts
+with `ON CONFLICT ... DO NOTHING` and says "already pending; nothing changed". Uploads are already
+idempotent by SHA-256 (D-005), and resolutions by the one-root-per-exception index (D-019).
+**Rejected:** client-side disabling of the button, which is presentation, not a control.
+
+### D-076: The UI never computes a figure
+**Status:** accepted (owner principle)
+**Decision:** every number on screen is read from the database. `run_overview` (migration 0009)
+gained `matches_exact`, `matches_gross_net`, `matches_many_to_one`, `exceptions_open`,
+`original_result_sha256` and `replay_outcome` so the UI has nothing to derive. The web code
+formats only: money is inserted with a decimal point by string slicing, never converted to a
+number. A test fails if the web source contains `Number(`, `parseFloat(`, `parseInt(`,
+`.reduce(`, `Math.` or `BigInt(` in code. Another asserts that the run page shows exactly the
+figures in `run_overview`. `DATE` columns are returned as their exact text, because pg's default
+local-midnight Date shifts business dates by server time zone.
+**Rejected:** computing totals in TypeScript from fetched rows. Two places computing one number
+will eventually disagree, and the one a client sees is the one on screen.
+
+### D-077: Authorisation is enforced on the server, per route, and tested by direct request
+**Status:** accepted (owner principle)
+**Decision:**
+- Every page calls `requirePageStaff()` before any query; anonymous visitors are redirected
+  before anything is read.
+- Every mutation is a plain POST route handler whose first call is `authorizeMutation()`:
+  401 not signed in, 403 role too low, 403 cross-site Origin. Refusal bodies are fixed short
+  texts that never echo the resource.
+- Authorisation precedes existence checks, so 404 is only ever seen by someone allowed to know.
+- Roles are re-read from `staff_user` on every request; the signed cookie only says who.
+- `resolved_by` and `requeued_by` are always the session's staff member, never a form field.
+
+The database repeats the controller rule (RC005) and the web role's privileges (no UPDATE or
+DELETE) as a second layer.
+**Rejected:** Server Actions for mutations. They are POST endpoints addressed by generated ids,
+awkward to request directly in a test, and a layout guard does not cover them. Plain route
+handlers make "request every mutation directly" a straightforward test.
+**Tested:** 45 tests over real HTTP against the production build. Anonymous: 6 pages × 3
+variants (HTML, RSC payload, prefetch) redirected with no data in the body, and 6 mutations
+refused 401 with no change. Invalid sessions (bad signature, expired, unknown staff, garbage)
+treated as anonymous. Analysts (both) refused 403 on requeue, including for non-existent jobs.
+Cross-site POSTs refused on all 6 mutations even with a controller session. Mutations answer 405
+to GET. Sign-in accepts only synthetic staff. A forged `resolved_by` is ignored.
+**Proven able to fail:** three guards were broken one at a time (requeue role check, run-page
+sign-in check, origin check) and rebuilt; 9, 6 and 6 tests failed respectively, all about the
+broken guard. With the requeue route's check removed, the database still refused the analyst
+(RC005), the second layer.
+
+### D-078: Replay from the UI is a job; failure is visible and never flattened
+**Status:** accepted (owner principle)
+**Decision:** "Replay this run" inserts a replay job and returns (303) at once; the engine never
+runs in the request. The run page shows "Replay pending" from the job table, and the outcome
+when the worker records it. Four replay events stay distinct on screen, because they are
+different events to an auditor:
+- `identical`: both hashes match, shown;
+- `different`: the replay ran and drifted; both hashes shown with "Drift: ...";
+- `failed`: a replay run was recorded but failed to run; its error shown;
+- refused: the replay job failed before any run existed, e.g. engine-version mismatch; the
+  job's reason shown.
+
+`run_overview.replay_identical` flattened `different` and `failed` into `false`; the new
+`replay_outcome` column distinguishes them in the database, not in the UI. Failed runs are
+listed as failed, with their error, and never hidden.
+
+### D-079: Web end-to-end tests run from the Python suite against the production build
+**Status:** accepted
+**Decision:** `tests/webapp.py` starts `next start` (the production build) on a free port, against
+a fresh migrated database seeded with every state the UI must show. It connects as a login role
+that is a member of `recon_web`, so database privileges apply exactly as deployed. It rebuilds
+the app when any web source is newer than the build, and fails (does not skip) without Node.
+CI installs Node, type-checks and builds the app before the suite.
+**Rejected:** (a) a separate TypeScript test runner, which would duplicate the database fixtures
+and seeding the Python suite already owns. (b) Testing against `next dev`, which is not what
+ships.
+
+### D-080: Design tokens copied unchanged from the KYC demo
+**Status:** accepted (owner direction)
+**Decision:** `web/src/styles/tokens.css` is a byte-for-byte copy of
+`kyc-compliance-desk/web/src/styles/tokens.css` (SHA-256 `327987a3…4937`). `globals.css` uses only
+its custom properties: no literal colours, sizes or spacing.
+**Rejected:** a second palette; the demos should read as one system by one person.

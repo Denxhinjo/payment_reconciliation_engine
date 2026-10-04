@@ -33,6 +33,7 @@ exists to find real ones. See design §3 and decision D-001. Level 1 is EUR only
 
 ```
 db/migrations/      numbered raw-SQL migrations (no ORM)
+web/                Next.js UI (reads stored results; computes nothing)
 worker/recon/       Python worker: migration runner, generator, parsers, importer, engine, runs, resolutions
 worker/tests/       tests, run against real PostgreSQL
 demo-data/2026-09/  the synthetic demo month (generated, committed, byte-reproducible)
@@ -88,7 +89,7 @@ three files without reading `planted.json`, and requires the result to be exactl
 | 4. Matching passes | done: exact, gross_net, many_to_one, classification with timing deadlines; runs persisted and re-verified by the database |
 | 5. Exceptions queue | done: queue view, evidence, resolve and correct (append-only), races decided by the database |
 | 6. Replay test | done: `recon replay`, golden hash per engine version, static purity check, cross-process determinism |
-| 7. Web UI | not started |
+| 7. Web UI | done: Next.js UI, server-side authorisation per route, replay as a job, idempotent requeue |
 
 ## Running the tests
 
@@ -182,3 +183,44 @@ statically. The demo month's result hash is pinned per engine version in
 `worker/tests/golden/results.json`. A run made by an older engine is replayed by checking out
 that version's tag (`git checkout engine-v1.0.0`). A replay that does not reproduce the
 original is recorded and shown as such in `run_overview`, never hidden (D-068 to D-070).
+
+## The web UI
+
+A Next.js app in `web/`. It reads stored runs and views and never computes a figure itself
+(D-076). Pages:
+
+- **Sign in:** a "sign in as" picker over the synthetic staff. The accounts are public.
+- **Runs:** every run, including failed ones and replays.
+- **Run detail:** the record, results, and replay status, which is one of identical, drifted
+  (both hashes shown), failed to run, refused, or pending.
+- **Exceptions queue.**
+- **Exception detail:** evidence and resolution history, with forms to resolve or correct.
+- **Upload:** upload a file, and request a reconciliation.
+- **Jobs:** attempts and errors per job; requeue for controllers.
+
+Access is enforced on the server for every page and every POST, not by hiding buttons (D-077).
+Replays and reconciliations are queued as jobs for the worker (D-078). Requeue is idempotent and
+never resets a job's attempts (D-074). Every page carries a "DEMO — SYNTHETIC DATA" banner.
+
+```sh
+# 1. A login role for the web app, as a member of recon_web (outside migrations: it has a password)
+psql "$ADMIN_URL" -c "CREATE ROLE recon_web_login LOGIN PASSWORD '<choose one>' IN ROLE recon_web"
+
+# 2. Build and start
+cd web
+npm ci
+npm run build
+DATABASE_URL="postgresql://recon_web_login:<password>@<host>/<db>" \
+SESSION_SECRET="<at least 32 random characters>" \
+npm start                              # http://127.0.0.1:3002
+
+# 3. The worker processes uploads, reconciliations and replays the UI queues
+cd ../worker && .venv/Scripts/python -m recon seed-staff && .venv/Scripts/python -m recon worker
+```
+
+The web end-to-end tests (`worker/tests/test_web_*.py`) start the production build against a
+fresh database and make real HTTP requests. They need Node 22, and fail (rather than skip) if it
+is missing.
+
+Weaknesses carried on purpose, with what would make each unacceptable, are listed in
+[docs/known-fragilities.md](docs/known-fragilities.md).

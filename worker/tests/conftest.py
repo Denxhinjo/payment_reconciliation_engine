@@ -120,3 +120,22 @@ APPEND_ONLY = "RC001"
 RUN_STATE = "RC002"
 FINISH_CHECK = "RC003"
 RUN_NOT_FINISHED = "RC004"
+
+
+@pytest.fixture(scope="session")
+def webapp():
+    """The production build of web/ running against a fresh, seeded database (tests/webapp.py)."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    from tests.webapp import start_webapp
+
+    with fresh_database() as url:
+        app, process = start_webapp(_admin_url(), url, conninfo_to_dict(url)["dbname"])
+        try:
+            yield app
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except Exception:  # noqa: BLE001 - make sure the server is gone either way
+                process.kill()

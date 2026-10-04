@@ -59,12 +59,14 @@ RUNNER_ONLY = {"schema_migration"}
 
 
 VIEWS = {"current_resolution", "exception_queue", "run_overview"}   # read-only for every role
+# Written only through requeue_failed_job() (SECURITY DEFINER), never directly (D-074).
+FUNCTION_WRITTEN = {"job_requeue"}
 
 
 def _expected(role: str, relation: str) -> set[str]:
     if relation in RUNNER_ONLY:
         return set()
-    if relation in VIEWS:
+    if relation in VIEWS or relation in FUNCTION_WRITTEN:
         return {"SELECT"}
     if role == "recon_web":
         return {"SELECT"} | ({"INSERT"} if relation in WEB_WRITES else set())
@@ -153,3 +155,11 @@ def test_web_role_update_is_refused_by_privilege_end_to_end(conn, resolved, web_
     only come from the UPDATE itself."""
     with raises_sqlstate(conn, INSUFFICIENT_PRIVILEGE):
         conn.execute("UPDATE resolution SET note = note")
+
+
+@pytest.mark.parametrize("role, allowed", [("recon_web", True), ("recon_worker", False), ("public", False)])
+def test_only_the_web_role_may_execute_requeue(conn, role, allowed):
+    (granted,) = conn.execute(
+        "SELECT has_function_privilege(%s, 'requeue_failed_job(bigint, bigint)', 'EXECUTE')",
+        (role,)).fetchone()
+    assert granted is allowed
