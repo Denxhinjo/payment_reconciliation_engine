@@ -14,9 +14,9 @@ export async function POST(request: Request) {
   } catch {
     staffId = null;
   }
-  if (!staffId) return backTo(request, "/login", { error: "Choose a staff account." });
+  if (!staffId) return backTo(request, "/login", { error: "signin_choose" });
   const { rows } = await pool.query("SELECT 1 FROM staff_user WHERE id = $1 AND is_synthetic", [staffId]);
-  if (rows.length === 0) return backTo(request, "/login", { error: "Unknown staff account." });
+  if (rows.length === 0) return backTo(request, "/login", { error: "signin_unknown" });
 
   const cookie = sessionCookie(staffId);
   const response = NextResponse.redirect(new URL("/runs", request.url), 303);

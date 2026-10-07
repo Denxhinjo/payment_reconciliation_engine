@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Staff } from "@/lib/auth";
+import { flashMessage } from "@/lib/messages";
 
 /** The signed-in shell: navigation, who you are, sign out. Presentation only; every page and
  * every POST route enforces access itself (lib/auth.ts). */
@@ -26,8 +27,9 @@ export function Shell({ staff, children }: { staff: Staff; children: React.React
   );
 }
 
-/** Outcome of the previous action, carried in the URL by a 303 redirect. React escapes it. */
-export function Flash({ notice, error }: { notice?: string; error?: string }) {
+/** Outcome of the previous action: fixed text looked up from the code in the URL (D-082).
+ * Callers pass the already-resolved messages from flashFrom(); nothing from the URL is shown. */
+export function Flash({ notice, error }: { notice?: string | null; error?: string | null }) {
   return (
     <>
       {notice ? <p className="flash ok" role="status">{notice}</p> : null}
@@ -51,5 +53,8 @@ export type SearchParams = Promise<Record<string, string | string[] | undefined>
 export async function flashFrom(searchParams: SearchParams) {
   const params = await searchParams;
   const pick = (key: string) => (typeof params[key] === "string" ? (params[key] as string) : undefined);
-  return { notice: pick("notice"), error: pick("error") };
+  return {
+    notice: flashMessage("notice", pick("notice"), pick("ref")),
+    error: flashMessage("error", pick("error"), pick("ref")),
+  };
 }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import type { ErrorCode, NoticeCode } from "@/lib/messages";
 import { readSessionStaffId } from "@/lib/session";
 
 /**
@@ -80,11 +81,16 @@ export async function authorizeMutation(
   return staff;
 }
 
-/** 303 back to a page, carrying a notice or an error for display. */
-export function backTo(request: Request, path: string, message: { notice?: string; error?: string }) {
+/**
+ * 303 back to a page, carrying a message CODE (and at most a numeric reference). The page renders
+ * the fixed text for that code; free text never travels in the URL (D-082).
+ */
+export function backTo(request: Request, path: string,
+                       message: { notice?: NoticeCode; error?: ErrorCode; ref?: string }) {
   const url = new URL(path, request.url);
   if (message.notice) url.searchParams.set("notice", message.notice);
   if (message.error) url.searchParams.set("error", message.error);
+  if (message.ref) url.searchParams.set("ref", message.ref);
   return NextResponse.redirect(url, 303);
 }
 

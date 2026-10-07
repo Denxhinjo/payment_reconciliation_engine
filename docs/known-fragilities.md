@@ -28,8 +28,6 @@ stage reports.
 | F15 | `engine_git_sha` is only recorded when `GITHUB_SHA` is set | provenance |
 | F16 | The generator's planted-problem rules are only verified for September 2026 | demo data |
 | F17 | The mutation check (30+ min) is a manual reviewer tool, not a CI gate | tests |
-| F18 | Flash messages travel in the URL and can be crafted | web |
-| F19 | A job whose worker dies stays `running`; nothing reclaims it | operations |
 | F20 | No action grants a job a fresh attempt budget | operations |
 | F21 | Web end-to-end tests share one server and database across files | tests |
 | F22 | Sign-out is not origin-checked | web |
@@ -164,26 +162,6 @@ recorded.
 **Stops being acceptable when:** `engine.py` changes. The tool must be re-run before the change
 is merged and the result recorded in its README.
 
-### F18: Flash messages travel in the URL and can be crafted
-**What:** after a form POST the app redirects with `?notice=` or `?error=` text, which the page
-displays. Anyone can craft a link that shows arbitrary text inside the banner area of a real page.
-**Why acceptable now:** React escapes it, so there is no script injection; the text cannot change
-any data; this is a demo with public synthetic accounts.
-**Stops being acceptable when:** real users rely on these messages. Then use message codes
-looked up server-side, or a one-time flash cookie.
-*Noticed in stage 7, not fixed (scope rule).*
-
-### F19: A job whose worker dies stays `running`; nothing reclaims it
-**What:** `attempts` is incremented at claim time so that a crashed attempt still counts, but no
-process returns a stale `running` job to the queue or marks it failed. A worker killed mid-job
-leaves its job `running` forever, and requeue (failed jobs only) cannot touch it.
-**Why acceptable now:** the demo worker is run on demand. A crash is visible on the Jobs page as
-a job stuck in `running`.
-**Stops being acceptable when:** the worker runs unattended (the GitHub Actions schedule). It
-then needs a lease (e.g. `started_at` older than N minutes) after which the job is marked
-`failed` with "worker lost", keeping its attempts, so it can be requeued within its budget.
-*Noticed in stage 7, not fixed (scope rule).*
-
 ### F20: No action grants a job a fresh attempt budget
 **What:** a job at `recon_max_job_attempts()` (3) can never run again. By owner direction, a
 fresh budget must be a distinct, explicitly named action, never a side effect of requeue. That
@@ -220,6 +198,25 @@ request size at the platform or proxy, or check `Content-Length` first.
 ---
 
 ## Closed
+
+### F18: Flash messages travel in the URL and can be crafted (closed before deployment)
+Closed by D-082. Pages render only fixed messages looked up from a code (`?notice=` /
+`?error=`), with at most a positive-integer `?ref=`. Unknown codes, built-in property names
+(`constructor`, `__proto__`) and malformed references render nothing, and the type checker
+rejects any route that passes free text. Tested over HTTP: crafted text in either parameter, on
+four pages, signed in and out, never appears in the page markup. Breaking the lookup on purpose
+fails 56 of those tests. Noted, not a fragility: Next.js serialises the URL's own query string
+into its `<script>` router payload; it is never displayed, and it is the same text as the
+address bar.
+
+### F19: A job whose worker dies stays `running` (closed before deployment)
+Closed by D-081. A claim takes a 15-minute lease (`lease_until`). Every worker invocation first
+sweeps: jobs still `running` past their lease become `failed` ("lease expired: worker did not
+finish"), with attempts preserved, so they can be requeued within the budget, and a job that
+keeps dying stops at it. A worker whose lease lapsed cannot record its result (its parse rows
+roll back). Tested: a stale job reclaimed; a job within its lease untouched; repeated expiry
+stops at 3 attempts; the lapsed-lease parse commits nothing (two real connections); the worker
+sweeps first. Each property was also broken on purpose and its test failed.
 
 ### F2: No command or UI to requeue a failed job (closed in stage 7)
 Closed by the stage 7 commit. Requeue is the database function `requeue_failed_job()` (D-074):

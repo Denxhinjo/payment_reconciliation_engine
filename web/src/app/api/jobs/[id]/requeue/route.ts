@@ -1,6 +1,6 @@
 import { authorizeMutation, backTo, parseId } from "@/lib/auth";
 import { pool } from "@/lib/db";
-import { REQUEUE_OUTCOMES } from "@/lib/messages";
+import { REQUEUE_CODES } from "@/lib/messages";
 
 /**
  * Requeue a failed job. Controller only, checked here AND inside the database function
@@ -18,8 +18,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     "SELECT requeue_failed_job($1, $2) AS outcome", [jobId, staff.id]);
   const outcome = rows[0].outcome;
   if (outcome === "not_found") return new Response("Not found.", { status: 404 });
-  const message = REQUEUE_OUTCOMES[outcome] ?? outcome;
-  return backTo(request, "/jobs", outcome === "requeued" || outcome === "already_queued"
-    ? { notice: `Job #${jobId}: ${message}` }
-    : { error: `Job #${jobId}: ${message}` });
+  const codes = REQUEUE_CODES[outcome];
+  if (!codes) throw new Error(`unexpected requeue outcome ${outcome}`); // never shown as text
+  return backTo(request, "/jobs", { ...codes, ref: jobId });
 }

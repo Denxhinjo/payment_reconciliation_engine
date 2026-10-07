@@ -1,0 +1,39 @@
+name: worker
+
+# The scheduled worker: sweeps expired leases, then processes queued parse, reconcile and replay
+# jobs, then exits. See docs/deploy.md.
+#
+# INERT until the repository variable RECON_WORKER_ENABLED is set to "true": every scheduled run
+# is skipped before any step runs, so pushing this file deploys nothing.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# One worker at a time. Claims already use FOR UPDATE SKIP LOCKED; this also keeps runs from
+# piling up if one is slow.
+concurrency:
+  group: recon-worker
+  cancel-in-progress: false
+
+jobs:
+  work:
+    if: vars.RECON_WORKER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Below the 15-minute job lease (recon_job_lease(), D-081): a stuck worker is killed before
+    # its lease can expire under it, so no job is ever processed by two workers at once.
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "psycopg[binary]==3.3.6" "lxml==6.1.3"
+      # GITHUB_SHA (set by Actions) is recorded on every run as engine_git_sha (D-063).
+      - run: python -m recon worker
+        env:
+          DATABASE_URL: ${{ secrets.RECON_WORKER_DATABASE_URL }}

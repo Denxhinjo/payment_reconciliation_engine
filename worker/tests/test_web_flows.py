@@ -4,6 +4,7 @@ upload. Real HTTP against the production build."""
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from urllib.parse import unquote_plus
@@ -24,10 +25,21 @@ def controller(webapp):
     return webapp.sign_in("Demo Controller")
 
 
-def _flash(response) -> str:
-    """The notice or error carried by a 303 back to a page."""
-    match = re.search(r"[?&](notice|error)=([^&]*)", response.location or "")
-    return unquote_plus(match.group(2)) if match else ""
+_VIEWER: dict = {}
+
+
+def _flash(webapp, response) -> str:
+    """Follow a 303 back to its page and return the message the page RENDERS for the code in the
+    URL. This tests the whole path: route -> code -> fixed text on screen (D-082)."""
+    assert response.status == 303, response
+    location = response.location
+    path = location[location.index("/", location.index("//") + 2):] if "//" in location else location
+    assert "notice=" in path or "error=" in path, path
+    if "viewer" not in _VIEWER:
+        _VIEWER["viewer"] = webapp.sign_in("Demo Analyst 2")
+    page = webapp.get(path, cookie=_VIEWER["viewer"])
+    shown = re.findall(r'<p class="flash (?:ok|bad)" role="(?:status|alert)">(.*?)</p>', page.text)
+    return html.unescape(" ".join(shown))
 
 
 # --- demo safety ---------------------------------------------------------------------------------
@@ -123,8 +135,8 @@ def test_replay_request_enqueues_a_job_and_returns_without_running_the_engine(we
     first = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     second = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     assert first.status == second.status == 303
-    assert _flash(first) == "Replay queued."
-    assert _flash(second) == "A replay of this run is already pending; nothing changed."
+    assert _flash(webapp, first) == "Replay queued."
+    assert _flash(webapp, second) == "A replay of this run is already pending; nothing changed."
     assert webapp.count("SELECT count(*) FROM job WHERE kind = 'replay' AND replay_of_run_id = %s "
                         "AND status = 'queued'", run) == 1
     assert webapp.count("SELECT count(*) FROM reconciliation_run") == runs_before   # no engine ran
@@ -134,7 +146,7 @@ def test_replay_request_enqueues_a_job_and_returns_without_running_the_engine(we
 
 def test_replay_of_a_failed_run_is_refused(webapp, analyst):
     response = webapp.post(f"/api/runs/{webapp.seeded.failed_run}/replay", cookie=analyst)
-    assert _flash(response) == "Only a finished run has a result to replay."
+    assert _flash(webapp, response) == "Only a finished run has a result to replay."
 
 
 # --- requeue: idempotent, attempts preserved, budget respected --------------------------------------
@@ -144,8 +156,8 @@ def test_requeue_twice_results_in_one_requeue_and_preserves_attempts(webapp, con
     jobs_before = webapp.count("SELECT count(*) FROM job")
     first = webapp.post(f"/api/jobs/{job}/requeue", cookie=controller)
     second = webapp.post(f"/api/jobs/{job}/requeue", cookie=controller)
-    assert "Job requeued. Its attempt count is unchanged." in _flash(first)
-    assert "already queued; nothing changed" in _flash(second)
+    assert "requeued. Its attempt count is unchanged." in _flash(webapp, first)
+    assert "already queued; nothing changed" in _flash(webapp, second)
     assert webapp.count("SELECT count(*) FROM job") == jobs_before
     assert webapp.count("SELECT count(*) FROM job_requeue WHERE job_id = %s", job) == 1
     with webapp.db() as conn:
@@ -155,7 +167,7 @@ def test_requeue_twice_results_in_one_requeue_and_preserves_attempts(webapp, con
 def test_requeue_of_an_exhausted_job_is_refused_and_attempts_stay(webapp, controller):
     job = webapp.seeded.exhausted_job
     response = webapp.post(f"/api/jobs/{job}/requeue", cookie=controller)
-    assert "used its whole attempt budget" in _flash(response)
+    assert "used its whole attempt budget" in _flash(webapp, response)
     with webapp.db() as conn:
         status, attempts, budget = conn.execute(
             "SELECT status, attempts, recon_max_job_attempts() FROM job WHERE id = %s", (job,)).fetchone()
@@ -173,26 +185,26 @@ def test_resolve_then_correct_keeps_both_and_refusals_are_plain(webapp, analyst,
     target = webapp.seeded.exceptions["p2"]
     path = f"/api/exceptions/{target}"
     short = webapp.post(f"{path}/resolve", cookie=analyst, form={"reason_code": "other_see_note", "note": "short"})
-    assert "at least 10 characters" in _flash(short)
+    assert "at least 10 characters" in _flash(webapp, short)
     assert webapp.count("SELECT count(*) FROM resolution WHERE exception_id = %s", target) == 0
 
     first = webapp.post(f"{path}/resolve", cookie=analyst, form={
         "reason_code": "processor_error_claim_raised", "note": "Synthetic: claim raised for EUR 0.40."})
-    assert "recorded" in _flash(first)
+    assert "recorded" in _flash(webapp, first)
     twice = webapp.post(f"{path}/resolve", cookie=controller, form={
         "reason_code": "other_see_note", "note": "Synthetic: a second first resolution."})
-    assert "already resolved" in _flash(twice)
+    assert "already resolved" in _flash(webapp, twice)
 
     with webapp.db() as conn:
         (first_id,) = conn.execute("SELECT id FROM resolution WHERE exception_id = %s", (target,)).fetchone()
     corrected = webapp.post(f"{path}/correct", cookie=controller, form={
         "reason_code": "funds_identified_and_posted", "note": "Synthetic: Orrery refunded on 6 Oct.",
         "supersedes_id": str(first_id)})
-    assert "Correction recorded" in _flash(corrected)
+    assert "Correction recorded" in _flash(webapp, corrected)
     stale = webapp.post(f"{path}/correct", cookie=analyst, form={
         "reason_code": "other_see_note", "note": "Synthetic: correcting an old one.",
         "supersedes_id": str(first_id)})
-    assert "already been corrected by someone else" in _flash(stale)
+    assert "already been corrected by someone else" in _flash(webapp, stale)
 
     page = webapp.get(f"/exceptions/{target}", cookie=analyst).text
     assert "superseded" in page and "in force" in page
@@ -204,9 +216,9 @@ def test_resolve_then_correct_keeps_both_and_refusals_are_plain(webapp, analyst,
 def test_upload_stores_bytes_exactly_once_and_queues_one_parse(webapp, analyst):
     content = b"# SYNTHETIC DEMO DATA upload test\r\nentry_id,booked_on\r\n"
     first = webapp.upload(analyst, "ledger", "synthetic-upload.csv", content)
-    assert "queued for parsing" in _flash(first)
+    assert "queued for parsing" in _flash(webapp, first)
     second = webapp.upload(analyst, "ledger", "renamed.csv", content)
-    assert "already imported as file #" in _flash(second)
+    assert "already imported as file #" in _flash(webapp, second)
     with webapp.db() as conn:
         rows = conn.execute("SELECT f.raw, (SELECT count(*) FROM job j WHERE j.import_file_id = f.id) "
                             "FROM import_file f WHERE f.sha256 = sha256(%s::bytea)", (content,)).fetchall()
@@ -220,8 +232,8 @@ def test_reconcile_request_is_queued_once(webapp, analyst):
     form = dict(zip(("ledger_file_id", "settlement_file_id", "bank_file_id"), map(str, files)))
     first = webapp.post("/api/runs", cookie=analyst, form=form)
     second = webapp.post("/api/runs", cookie=analyst, form=form)
-    assert "Reconciliation queued" in _flash(first)
-    assert "already queued" in _flash(second)
+    assert "Reconciliation queued" in _flash(webapp, first)
+    assert "already queued" in _flash(webapp, second)
     assert webapp.count("SELECT count(*) FROM job WHERE kind = 'reconcile' AND status = 'queued'") == 1
 
 
@@ -231,4 +243,4 @@ def test_reconcile_request_refuses_a_file_in_the_wrong_slot(webapp, analyst):
                              (webapp.seeded.run,)).fetchone()
     response = webapp.post("/api/runs", cookie=analyst, form={
         "ledger_file_id": str(bank), "settlement_file_id": str(bank), "bank_file_id": str(bank)})
-    assert "successfully parsed file of that kind" in _flash(response)
+    assert "successfully parsed file of that kind" in _flash(webapp, response)

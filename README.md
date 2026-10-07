@@ -11,6 +11,8 @@ a human, and can recompute any past reconciliation byte for byte.
 - Design: [docs/design.md](docs/design.md)
 - Every design decision, with the alternative rejected: [docs/decisions.md](docs/decisions.md)
 - Source files the bank-format parser is built from: [docs/sources/](docs/sources/)
+- Deploying it (Neon + Vercel + GitHub Actions): [docs/deploy.md](docs/deploy.md)
+- Weaknesses carried on purpose: [docs/known-fragilities.md](docs/known-fragilities.md)
 
 ## Bank statement format
 

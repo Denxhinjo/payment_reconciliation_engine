@@ -19,10 +19,10 @@ export async function POST(request: Request) {
       bank: parseId(form.get("bank_file_id")),
     };
   } catch {
-    return backTo(request, "/upload", { error: "Choose one file of each kind." });
+    return backTo(request, "/upload", { error: "reconcile_choose" });
   }
   if (!ids.ledger || !ids.settlement || !ids.bank) {
-    return backTo(request, "/upload", { error: "Choose one file of each kind." });
+    return backTo(request, "/upload", { error: "reconcile_choose" });
   }
 
   // Each slot must hold a successfully parsed file of the right kind. The database enforces this
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
         OR (p.import_file_id = $3 AND p.kind = 'bank'))`,
     [ids.ledger, ids.settlement, ids.bank]);
   if (rows.length !== 3) {
-    return backTo(request, "/upload", { error: "Each slot needs a successfully parsed file of that kind." });
+    return backTo(request, "/upload", { error: "reconcile_slots" });
   }
 
   const inserted = await pool.query(
@@ -43,8 +43,6 @@ export async function POST(request: Request) {
      RETURNING id`,
     [ids.ledger, ids.settlement, ids.bank]);
   return backTo(request, "/upload", {
-    notice: inserted.rowCount
-      ? "Reconciliation queued. It appears under Runs when the worker has computed it."
-      : "A reconciliation of these three files is already queued; nothing changed.",
+    notice: inserted.rowCount ? "reconcile_queued" : "reconcile_already_queued",
   });
 }

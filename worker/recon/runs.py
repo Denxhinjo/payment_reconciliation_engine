@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import psycopg
 
+from recon import jobs
 from recon.engine import ENGINE_VERSION, EngineInputError, run_engine
 from recon.parse import PARSER_VERSION
 
@@ -150,32 +151,20 @@ def process_reconcile_job(conn: psycopg.Connection, job_id: int | None = None,
                           engine_git_sha: str | None = None) -> tuple[int, RunOutcome] | None:
     """Claim one queued reconcile job and run it. A failed *run* is a recorded outcome; the job
     is 'done' either way and points at the run (D-052)."""
-    with conn.transaction():
-        row = conn.execute(
-            "SELECT id, ledger_file_id, settlement_file_id, bank_file_id FROM job "
-            "WHERE kind = 'reconcile' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
-            "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
-            (job_id, job_id),
-        ).fetchone()
-        if row is None:
-            return None
-        job_id = row[0]
-        conn.execute(
-            "UPDATE job SET status = 'running', attempts = attempts + 1, started_at = now() "
-            "WHERE id = %s", (job_id,))
+    claimed = jobs.claim(conn, "reconcile", "ledger_file_id, settlement_file_id, bank_file_id", job_id)
+    if claimed is None:
+        return None
+    ledger_file, settlement_file, bank_file = claimed.arguments
     try:
-        outcome = create_and_run(conn, row[1], row[2], row[3], engine_git_sha=engine_git_sha)
+        outcome = create_and_run(conn, ledger_file, settlement_file, bank_file, engine_git_sha=engine_git_sha)
     except Exception as exc:
-        with conn.transaction():
-            conn.execute(
-                "UPDATE job SET status = 'failed', finished_at = now(), error = %s WHERE id = %s",
-                (f"{type(exc).__name__}: {exc}", job_id))
+        jobs.fail_quietly(conn, claimed, f"{type(exc).__name__}: {exc}")
         raise
+    # The run is recorded either way (it is evidence); the job is marked done only while this
+    # worker still holds its lease (D-081).
     with conn.transaction():
-        conn.execute(
-            "UPDATE job SET status = 'done', finished_at = now(), run_id = %s WHERE id = %s",
-            (outcome.run_id, job_id))
-    return job_id, outcome
+        jobs.finish(conn, claimed, "done", run_id=outcome.run_id)
+    return claimed.job_id, outcome
 
 
 # --- replay (design §6) ---------------------------------------------------------------------------
@@ -235,29 +224,19 @@ def process_replay_job(conn: psycopg.Connection, job_id: int | None = None,
                        engine_git_sha: str | None = None) -> tuple[int, ReplayOutcome | str] | None:
     """Claim one queued replay job. The job is 'done' with the replay run, or 'failed' with the
     refusal reason if the run cannot be replayed by this engine."""
-    with conn.transaction():
-        row = conn.execute(
-            "SELECT id, replay_of_run_id FROM job "
-            "WHERE kind = 'replay' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
-            "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
-            (job_id, job_id),
-        ).fetchone()
-        if row is None:
-            return None
-        job_id, original = row
-        conn.execute(
-            "UPDATE job SET status = 'running', attempts = attempts + 1, started_at = now() "
-            "WHERE id = %s", (job_id,))
+    claimed = jobs.claim(conn, "replay", "replay_of_run_id", job_id)
+    if claimed is None:
+        return None
+    (original,) = claimed.arguments
     try:
         outcome = replay(conn, original, engine_git_sha=engine_git_sha)
     except ReplayRefused as refusal:
         with conn.transaction():
-            conn.execute(
-                "UPDATE job SET status = 'failed', finished_at = now(), error = %s WHERE id = %s",
-                (str(refusal), job_id))
-        return job_id, str(refusal)
+            jobs.finish(conn, claimed, "failed", error=str(refusal))
+        return claimed.job_id, str(refusal)
+    except Exception as exc:
+        jobs.fail_quietly(conn, claimed, f"{type(exc).__name__}: {exc}")
+        raise
     with conn.transaction():
-        conn.execute(
-            "UPDATE job SET status = 'done', finished_at = now(), run_id = %s WHERE id = %s",
-            (outcome.replay_run_id, job_id))
-    return job_id, outcome
+        jobs.finish(conn, claimed, "done", run_id=outcome.replay_run_id)
+    return claimed.job_id, outcome

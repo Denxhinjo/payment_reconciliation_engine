@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 import psycopg
 
+from recon import jobs
 from recon.parse import PARSER_VERSION, ParseError
 from recon.parse.bank import parse_bank
 from recon.parse.csvfiles import parse_ledger, parse_settlement
@@ -144,31 +145,16 @@ def _insert_rows(conn: psycopg.Connection, file_id: int, kind: str, raw: bytes) 
     raise ValueError(f"unknown file kind {kind!r}")
 
 
-def _claim(conn: psycopg.Connection, job_id: int | None) -> tuple[int, int] | None:
-    """Mark one queued parse job running. Returns (job_id, file_id) or None."""
-    with conn.transaction():
-        row = conn.execute(
-            "SELECT id, import_file_id FROM job "
-            "WHERE kind = 'parse_file' AND status = 'queued' AND attempts < recon_max_job_attempts() AND (%s::bigint IS NULL OR id = %s) "
-            "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
-            (job_id, job_id),
-        ).fetchone()
-        if row is None:
-            return None
-        conn.execute(
-            "UPDATE job SET status = 'running', attempts = attempts + 1, started_at = now() "
-            "WHERE id = %s",
-            (row[0],),
-        )
-        return row[0], row[1]
-
-
 def process_parse_job(conn: psycopg.Connection, job_id: int | None = None) -> ParseOutcome | None:
-    """Process one queued parse job (the given one, or the oldest). None if nothing queued."""
-    claimed = _claim(conn, job_id)
+    """Process one queued parse job (the given one, or the oldest). None if nothing queued.
+
+    The parse outcome, the rows and the job's completion commit together, and only while this
+    worker still holds the job's lease (D-081): if the lease lapsed, LeaseLost rolls it all back.
+    """
+    claimed = jobs.claim(conn, "parse_file", "import_file_id", job_id)
     if claimed is None:
         return None
-    job_id, file_id = claimed
+    job_id, (file_id,) = claimed.job_id, claimed.arguments
     try:
         with conn.transaction():
             kind, raw = conn.execute(
@@ -192,16 +178,12 @@ def process_parse_job(conn: psycopg.Connection, job_id: int | None = None) -> Pa
                     (file_id, kind, PARSER_VERSION, str(rejection)),
                 )
                 outcome = ParseOutcome(job_id, file_id, "rejected", 0, str(rejection))
-            conn.execute(
-                "UPDATE job SET status = 'done', finished_at = now() WHERE id = %s", (job_id,)
-            )
+            jobs.finish(conn, claimed, "done")
         return outcome
+    except jobs.LeaseLost:
+        raise
     except Exception as exc:
-        with conn.transaction():
-            conn.execute(
-                "UPDATE job SET status = 'failed', finished_at = now(), error = %s WHERE id = %s",
-                (f"{type(exc).__name__}: {exc}", job_id),
-            )
+        jobs.fail_quietly(conn, claimed, f"{type(exc).__name__}: {exc}")
         raise
 
 

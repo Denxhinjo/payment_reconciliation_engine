@@ -899,3 +899,58 @@ ships.
 `kyc-compliance-desk/web/src/styles/tokens.css` (SHA-256 `327987a3…4937`). `globals.css` uses only
 its custom properties: no literal colours, sizes or spacing.
 **Rejected:** a second palette; the demos should read as one system by one person.
+
+## Before deployment, 2026-10-07
+
+### D-081: Job leases, and a sweep at the start of every worker run
+**Status:** accepted (owner request; closes F19)
+**Decision:** claiming a job sets `lease_until = now() + recon_job_lease()`, and every running job
+must have one (CHECK). `expire_job_leases()`, executable only by `recon_worker`, runs first in
+every `recon worker` invocation. It marks jobs still `running` past their lease as `failed` with
+"lease expired: worker did not finish", leaving `attempts` untouched. Claiming and finishing live
+in one module (`recon.jobs`) for all three job kinds. A worker records an outcome only while it
+still holds its lease: the finishing UPDATE requires `status = 'running' AND lease_until = <its
+lease>`, and otherwise raises `LeaseLost`. For a parse, the rows roll back with it.
+**Why 15 minutes:** measured on the demo month locally, the slowest normal job is a replay
+(0.97 s), with reconcile 0.84 s and each parse about 0.2 s. On Neon from GitHub Actions, each of
+the roughly 100 sequential statements in a reconcile is a network round trip, and a suspended
+free-tier compute adds a cold start of a few seconds. The estimated worst normal case is about
+30 s. 15 minutes is about 30 times that, and above the scheduled worker's 10-minute job timeout,
+so a worker is always killed before its own lease could expire under it.
+**Rejected:** (a) a short lease (e.g. 1 minute), which risks expiring a slow but live worker and
+letting a second worker take the job. (b) Resetting attempts on expiry, which would make a job
+that kills its worker run forever. (c) Letting a lapsed worker still mark the job done, which
+lets two workers' results race.
+**Proven able to fail:** with the finish ignoring the lease, 2 tests fail; with the sweep failing
+every running job, 1 fails; with the worker not sweeping first, 1 fails.
+
+### D-082: Flash messages are codes with fixed texts
+**Status:** accepted (owner request; closes F18)
+**Decision:** a POST redirects with `?notice=<code>` or `?error=<code>`, plus at most `?ref=`
+(a positive integer). Pages render only the fixed text the code maps to, in
+`web/src/lib/messages.ts`. A code missing from the table, a built-in property name, or a
+template needing a ref without a valid one renders nothing. `backTo()` is typed to accept only
+codes, so a route that passes free text does not compile. Resolution refusals map
+constraint → code (still D-067), and requeue outcomes map to codes.
+**Noted:** Next.js serialises the URL's query string into the `<script>` router payload of every
+page. That is data, never displayed, and identical to the address bar, so it is not rendering.
+The test checks that crafted text appears nowhere in the markup outside `<script>`.
+**Rejected:** (a) a one-time flash cookie: more state for the same guarantee. (b) Sanitising free
+text: an allow-list of fixed messages is simpler to reason about and cannot be talked into
+anything.
+**Proven able to fail:** with the page rendering the raw URL text again, 56 of the 58 message
+tests fail.
+
+### D-083: Deployment runbook; the scheduled worker is inert until enabled
+**Status:** accepted
+**Decision:** `docs/deploy.md` gives the exact order for a new Neon project and Vercel project:
+migrations (owner, from the operator's machine), login roles (owner, Neon SQL Editor), staff
+seed, demo import, first reconcile checked against the golden hash, replay, GitHub Actions
+secret and variable, Vercel, smoke test. Each step has a check. `.github/workflows/worker.yml`
+runs the worker every 15 minutes but skips every run unless the repository variable
+`RECON_WORKER_ENABLED` is `true`, so committing it deploys nothing. The owner credential is never
+stored in Vercel or GitHub. The web uses a pooled connection as `recon_web_login`; the worker
+uses a direct connection as `recon_worker_login`.
+**Not yet verified on Neon, and flagged in the runbook:** creating login roles with
+`IN ROLE recon_web` / `recon_worker` as `neondb_owner`, and migrations 0007–0010. The runbook
+says to stop and report if Neon refuses.

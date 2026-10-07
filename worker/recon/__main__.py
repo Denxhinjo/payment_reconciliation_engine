@@ -141,7 +141,13 @@ def main(argv: list[str] | None = None) -> int:
     git_sha = os.environ.get("GITHUB_SHA")
 
     if args.command == "worker":
+        from recon import jobs
+
         with _connect(parser, args.database_url) as conn:
+            # First, every invocation: fail jobs whose worker died (lease lapsed), attempts kept.
+            expired = jobs.expire_leases(conn)
+            for job_id in expired:
+                print(f"job #{job_id}: {jobs.LEASE_EXPIRED_ERROR}; marked failed, attempts kept")
             outcomes = importer.run_parse_jobs(conn)
             reconciled = []
             while (done := runs.process_reconcile_job(conn, engine_git_sha=git_sha)) is not None:

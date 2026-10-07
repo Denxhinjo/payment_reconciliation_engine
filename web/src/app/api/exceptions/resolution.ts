@@ -22,10 +22,10 @@ export async function recordResolution(request: Request, rawId: string, correcti
     note = String(form.get("note") ?? "");
     supersedes = parseId(form.get("supersedes_id"));
   } catch {
-    return backTo(request, page, { error: "The form could not be read." });
+    return backTo(request, page, { error: "form_unreadable" });
   }
   if (correcting && !supersedes) {
-    return backTo(request, page, { error: "A correction must name the resolution it supersedes." });
+    return backTo(request, page, { error: "correction_needs_target" });
   }
 
   try {
@@ -34,13 +34,13 @@ export async function recordResolution(request: Request, rawId: string, correcti
        VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
       [exceptionId, correcting ? supersedes : null, reason, note, staff.id]);
     return backTo(request, page, {
-      notice: correcting ? `Correction recorded as resolution #${rows[0].id}.` : `Resolution #${rows[0].id} recorded.`,
+      notice: correcting ? "correction_recorded" : "resolution_recorded", ref: rows[0].id,
     });
   } catch (err) {
     const pgError = asPgError(err);
-    const message = pgError ? resolutionRefusal(pgError) : null;
-    if (message === "No such exception.") return new Response("Not found.", { status: 404 });
-    if (message) return backTo(request, page, { error: message });
+    const code = pgError ? resolutionRefusal(pgError) : null;
+    if (code === "no_such_exception") return new Response("Not found.", { status: 404 });
+    if (code) return backTo(request, page, { error: code });
     throw err; // unrecognised: do not disguise it as a known refusal
   }
 }

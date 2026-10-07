@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     "SELECT status FROM reconciliation_run WHERE id = $1", [runId]);
   if (!rows[0]) return new Response("Not found.", { status: 404 });
   if (rows[0].status !== "finished") {
-    return backTo(request, `/runs/${runId}`, { error: "Only a finished run has a result to replay." });
+    return backTo(request, `/runs/${runId}`, { error: "replay_not_finished" });
   }
 
   const inserted = await pool.query(
@@ -26,6 +26,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
      ON CONFLICT (replay_of_run_id) WHERE kind = 'replay' AND status IN ('queued', 'running') DO NOTHING
      RETURNING id`, [runId]);
   return backTo(request, `/runs/${runId}`, {
-    notice: inserted.rowCount ? "Replay queued." : "A replay of this run is already pending; nothing changed.",
+    notice: inserted.rowCount ? "replay_queued" : "replay_already_pending",
   });
 }

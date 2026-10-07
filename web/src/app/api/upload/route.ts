@@ -1,5 +1,6 @@
 import { authorizeMutation, backTo } from "@/lib/auth";
 import { withTransaction } from "@/lib/db";
+import type { NoticeCode } from "@/lib/messages";
 
 const KINDS = new Set(["ledger", "settlement", "bank"]);
 const MAX_BYTES = 4 * 1024 * 1024; // the database enforces the same limit on import_file.raw
@@ -22,25 +23,24 @@ export async function POST(request: Request) {
     name = file.name || "upload";
     raw = Buffer.from(await file.arrayBuffer());
   } catch {
-    return backTo(request, "/upload", { error: "Choose a file and its kind." });
+    return backTo(request, "/upload", { error: "upload_incomplete" });
   }
-  if (!KINDS.has(kind)) return backTo(request, "/upload", { error: "Unknown file kind." });
-  if (raw.length === 0) return backTo(request, "/upload", { error: "The file is empty." });
-  if (raw.length > MAX_BYTES) return backTo(request, "/upload", { error: "The file is larger than 4 MiB." });
+  if (!KINDS.has(kind)) return backTo(request, "/upload", { error: "upload_kind" });
+  if (raw.length === 0) return backTo(request, "/upload", { error: "upload_empty" });
+  if (raw.length > MAX_BYTES) return backTo(request, "/upload", { error: "upload_too_large" });
 
-  const outcome = await withTransaction(async (client) => {
+  const outcome = await withTransaction(async (client): Promise<{ notice: NoticeCode; ref: string }> => {
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO import_file (kind, original_name, raw, uploaded_by) VALUES ($1, $2, $3, $4)
        ON CONFLICT (sha256) DO NOTHING RETURNING id::text`,
       [kind, name, raw, staff.id]);
     if (inserted.rows[0]) {
       await client.query("INSERT INTO job (kind, import_file_id) VALUES ('parse_file', $1)", [inserted.rows[0].id]);
-      return { notice: `Stored as file #${inserted.rows[0].id}; queued for parsing.` };
+      return { notice: "upload_stored", ref: inserted.rows[0].id };
     }
     const existing = await client.query<{ id: string; kind: string }>(
       "SELECT id::text, kind FROM import_file WHERE sha256 = sha256($1::bytea)", [raw]);
-    const row = existing.rows[0];
-    return { notice: `These exact bytes were already imported as file #${row.id} (${row.kind}); nothing done.` };
+    return { notice: "upload_duplicate", ref: existing.rows[0].id };
   });
   return backTo(request, "/upload", outcome);
 }
