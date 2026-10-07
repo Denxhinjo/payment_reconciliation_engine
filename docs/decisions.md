@@ -954,3 +954,22 @@ uses a direct connection as `recon_worker_login`.
 **Not yet verified on Neon, and flagged in the runbook:** creating login roles with
 `IN ROLE recon_web` / `recon_worker` as `neondb_owner`, and migrations 0007–0010. The runbook
 says to stop and report if Neon refuses.
+
+## Before deployment, part 2, 2026-10-07
+
+### D-084: Migration files must contain no carriage returns
+**Status:** accepted (owner request)
+**Decision:** a test fails if any file in `db/migrations/` contains a carriage return. A second test
+proves the check catches both CRLF and lone CR.
+**Why:** the runner hashes each migration's exact bytes (D-035). A CRLF working copy and an LF clone
+of the same migration hash differently, and the runner would then refuse the database. That had
+already happened once locally (0010 written with CRLF; the committed copy was correct). With
+CRLF injected into 0010 on purpose, the test failed and named the file.
+
+### D-085: Public writes on the deployed demo: proposal
+**Status:** proposed, **awaiting owner decision**
+**Proposal:** `docs/proposal-public-writes.md`. (a) Nightly reset of a `live` Neon branch to a
+`pristine` parent ("reset from parent", which keeps connection strings). (b) Public read-only, with
+writes behind a shared demo password.
+**Recommended:** (a), because its worst case is bounded by the reset interval, while (b)'s worst
+case (a leaked password) leaves permanent writes that only (a) could remove.
