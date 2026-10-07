@@ -8,13 +8,15 @@ name: worker
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Hourly (F24): each run wakes the free-tier database for about 5 minutes. Minute 7 avoids the
+    # top-of-the-hour congestion GitHub warns about for scheduled workflows.
+    - cron: "7 * * * *"
   workflow_dispatch:
 
-# One worker at a time. Claims already use FOR UPDATE SKIP LOCKED; this also keeps runs from
-# piling up if one is slow.
+# One worker at a time, and never during the nightly reset (same group as reset-demo.yml).
+# Claims already use FOR UPDATE SKIP LOCKED; this also keeps runs from piling up.
 concurrency:
-  group: recon-worker
+  group: recon-database
   cancel-in-progress: false
 
 jobs:

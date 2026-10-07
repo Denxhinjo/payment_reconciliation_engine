@@ -17,7 +17,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="demo-banner" role="note">
           DEMO — SYNTHETIC DATA. Orrery Payments and Demo Bank are fictional; no real people,
-          accounts or transactions.
+          accounts or transactions.{" "}
+          <span className="demo-reset">
+            This demo resets every night at 03:00 UTC; anything you change is discarded then.
+          </span>
         </div>
         {children}
       </body>

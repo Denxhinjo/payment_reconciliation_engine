@@ -13,6 +13,7 @@ import pytest
 
 WEB_SRC = Path(__file__).resolve().parents[2] / "web" / "src"
 BANNER = "DEMO — SYNTHETIC DATA"
+RESET_NOTICE = "This demo resets every night at 03:00 UTC; anything you change is discarded then."
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +47,7 @@ def _flash(webapp, response) -> str:
 
 def test_sign_in_page_prints_the_synthetic_accounts_openly(webapp):
     page = webapp.get("/login")
-    assert page.status == 200 and BANNER in page.body
+    assert page.status == 200 and BANNER in page.body and RESET_NOTICE in page.text
     for name in ("Demo Analyst 1", "Demo Analyst 2", "Demo Controller"):
         assert name in page.body
     assert "There is no password" in page.body
@@ -59,6 +60,7 @@ def test_every_page_carries_the_demo_banner(webapp, analyst, template):
     s = webapp.seeded
     page = webapp.get(template.format(run=s.run, p2=s.exceptions["p2"]), cookie=analyst)
     assert BANNER in page.body
+    assert RESET_NOTICE in page.text
 
 
 # --- figures come from the database ---------------------------------------------------------------

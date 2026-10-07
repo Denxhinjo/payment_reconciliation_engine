@@ -1,6 +1,8 @@
 # Proposal: what a public visitor may change (fragility F6)
 
-**Status:** proposal for the owner's decision. Nothing here is built.
+**Status:** decided 2026-10-07: option (a), the nightly reset, is built (D-085, D-086). Option (b)
+was not built; it can be added on top of (a) if abuse appears. This document is kept as the
+reasoning behind the choice.
 **Question:** the deployed demo is public. Any visitor can sign in as a demo staff member and
 then upload files, request reconciliations and replays, and resolve or correct exceptions.
 Should they be able to, and if so, how is the demo kept clean?

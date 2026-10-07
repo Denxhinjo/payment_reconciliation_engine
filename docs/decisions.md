@@ -966,10 +966,107 @@ of the same migration hash differently, and the runner would then refuse the dat
 already happened once locally (0010 written with CRLF; the committed copy was correct). With
 CRLF injected into 0010 on purpose, the test failed and named the file.
 
-### D-085: Public writes on the deployed demo: proposal
-**Status:** proposed, **awaiting owner decision**
+### D-085: Public writes on the deployed demo: nightly reset
+**Status:** accepted: option (a), chosen by the owner on 2026-10-07 (was: proposed)
 **Proposal:** `docs/proposal-public-writes.md`. (a) Nightly reset of a `live` Neon branch to a
 `pristine` parent ("reset from parent", which keeps connection strings). (b) Public read-only, with
 writes behind a shared demo password.
 **Recommended:** (a), because its worst case is bounded by the reset interval, while (b)'s worst
 case (a leaked password) leaves permanent writes that only (a) could remove.
+
+## Nightly reset built; worker hourly, 2026-10-07
+
+### D-085 (continued): why option (b) was rejected
+**Decision recorded:** the owner chose option (a), the nightly reset. Option (b), public read-only
+with writes behind a shared demo password, was rejected for three reasons:
+- its worst case, a leaked password, leaves *permanent* writes, and the only way to remove them
+  is the reset of option (a) anyway;
+- it stops casual visitors from trying the workflow that the demo exists to show;
+- it attributes every write to the same shared synthetic accounts, so it would not even say who
+  did what.
+
+(b) can be added on top of (a) if abuse appears; the reset then remains the safety net.
+
+### D-086: The nightly reset: how it works, how it was verified, what it does not guarantee
+**Status:** accepted (implements D-085)
+**What it does:** every night at 03:00 UTC the Neon branch `live` (used by the website and the
+worker) is replaced by an exact copy of its parent `pristine` (prepared once with the demo month,
+never connected to otherwise). Whatever visitors wrote since the last reset is discarded. Every
+page says so in its banner.
+**Mechanism:**
+- `.github/workflows/reset-demo.yml` runs `neon branches reset live --parent` with a
+  project-scoped Neon API key, then checks that `live` is exactly the prepared demo: run #1 with
+  the golden result hash, no resolutions, three files. The workflow fails visibly otherwise.
+- It is inert until the repository variable `RECON_RESET_ENABLED` is `true`.
+- It shares a concurrency group with the worker, so a reset never interrupts a worker run.
+- `docs/deploy.md` was rewritten: seeding on `pristine`, then `live` branched from it, with the
+  website and worker on `live`.
+
+**Verified on a throwaway Neon project (Postgres 18, Frankfurt), then deleted:**
+- all ten migrations applied, which had been unverified on Neon for 0007–0010;
+- login roles created with `IN ROLE` as `neondb_owner`, previously unverified, and 7/7 privilege
+  checks as expected;
+- first reconciliation 65/7 with the **golden hash**; replay identical;
+- `live` branched from `pristine` with roles and data;
+- a visitor's resolution and upload written through the real production web app;
+- the reset run with a **project-scoped API key**: Neon's documentation does not say whether that
+  key type may reset branches, and it can;
+- the reset command took 11.4 s from start to finish.
+
+Three probes ran during the reset:
+- a fresh connection every 100 ms: **0 failures**;
+- one long-lived connection: **1 failure** (`AdminShutdown`), reconnected after **0.15 s**;
+- a signed-in web request every 200 ms: **1 request answered HTTP 500**, and the next succeeded
+  **0.28 s** later.
+
+After the reset, **the same sign-in cookie still worked** (sessions name synthetic staff ids,
+which are identical in `pristine`), the visitor's resolution and upload were gone, and the
+golden hash was unchanged. The project-scoped key was then revoked and the project deleted.
+
+**Why this approach:** see D-085. The reset is an infrastructure operation outside the
+application, like restoring a backup, so the application's own guarantee (it can never edit or
+delete) is untouched.
+
+**What it does NOT guarantee:**
+- **The interruption is visible to a few people.** A visitor mid-request at the moment of reset
+  can get one error page. Measured: one HTTP 500, recovered in 0.28 s; a reload works.
+- **Abuse stays visible until the next reset.** Anything a visitor writes, offensive text
+  included, is shown until 03:00 UTC.
+- **The storage can fill up.** A visitor can fill the 1 GB storage within a day; writes then fail
+  safely until the reset.
+- **A reset can be skipped silently.** GitHub keeps at most one *pending* run per concurrency
+  group, so if the worker were still running at 03:00 and another worker run became pending, the
+  pending reset could be cancelled. It would show as "cancelled" in Actions, and the next night
+  resets as normal. The worker's runs take seconds, so this needs an unusual overlap.
+- **Scheduled workflows stop after inactivity.** GitHub disables them after 60 days without
+  repository activity; the demo would then stop resetting until they are re-enabled.
+- **The API key's reach.** A project-scoped key can still reset or delete *branches* in this
+  project, including `pristine`. It cannot delete the project. It lives only in GitHub secrets.
+- **Migrations go to `pristine`.** Schema changes must be applied to `pristine` and then reset into
+  `live`; changing `live` directly is undone at the next reset.
+
+### D-087: The worker runs hourly; compute is budgeted per project
+**Status:** accepted (owner decision; addresses F24)
+**Decision:** `worker.yml` runs at minute 7 of every hour, instead of every 15 minutes.
+**Correction recorded:** the decision assumed a "Run now" button in the UI triggers the worker.
+None exists. "Replay this run" and "Queue reconciliation" only enqueue, so a visitor now waits up
+to an hour unless someone runs the workflow by hand in GitHub. Recorded as F25, not built: a
+"Run now" would need a GitHub token in Vercel, which is a security decision for the owner.
+**Compute (Neon documentation, Plans page, read 2026-10-07):**
+- The Free plan includes "100 CU-hours/project" per month, stated **per project**. The only
+  account-wide total on the free plan is storage ("1 GB/project, 20 GB account total"). The
+  owner's second demo, in its own Neon project, therefore has its own 100 CU-hours; the two do
+  not share a compute limit.
+- Free-plan databases scale to zero "After 5 min", which cannot be disabled.
+- When a project runs out of CU-hours, its "compute is suspended until the next billing period or
+  until you upgrade".
+
+**Estimate for this project:**
+- Each hourly worker run wakes the database for about 5 minutes: 24 × 5 min ≈ 2 hours a day,
+  about 61 hours a month at the 0.25 CU minimum ≈ **15 CU-hours**.
+- The nightly reset's verification step wakes it once more: about **0.6 CU-hours**.
+- Baseline: about **16 of 100 CU-hours a month** (it was about 61 at every 15 minutes).
+- That leaves about 84 CU-hours, roughly 330 hours of visitor-awake time at 0.25 CU.
+
+This is an estimate, not a measurement: Neon's autoscaling (up to 2 CU on the free plan) could
+use more under real load.

@@ -1,0 +1,59 @@
+name: reset-demo
+
+# Nightly reset of the public demo (D-085): the Neon branch `live`, which the web app and the
+# worker use, is reset to its parent `pristine`, which holds only the prepared demo month. Anything
+# visitors wrote since the last reset is discarded. See docs/deploy.md.
+#
+# INERT until the repository variable RECON_RESET_ENABLED is set to "true": every run is skipped
+# before any step runs, so pushing this file deploys nothing.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"        # 03:00 UTC daily, the time stated on every page
+  workflow_dispatch:
+
+# Shared with the worker: a reset never interrupts a worker run, and the other way round.
+concurrency:
+  group: recon-database
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: vars.RECON_RESET_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # A project-scoped Neon API key: it can manage this one project but cannot delete it.
+      # Verified on a throwaway project that this key type can reset a branch (D-086).
+      - name: Reset live from pristine
+        run: npx -y neon@7.0.6 branches reset live --parent --project-id "$NEON_PROJECT_ID" --no-analytics
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+
+      # Fail visibly unless live is now exactly the prepared demo: run #1 with the golden result,
+      # no resolutions, and only the three demo files.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "psycopg[binary]==3.3.6"
+      - name: Verify live is pristine
+        working-directory: worker
+        env:
+          DATABASE_URL: ${{ secrets.RECON_WORKER_DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          import psycopg
+          golden = list(json.load(open("tests/golden/results.json"))["1.0.0"].values())[0]
+          with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+              sha, resolutions, files = conn.execute(
+                  "SELECT (SELECT result_sha256 FROM run_overview WHERE run_id = 1),"
+                  " (SELECT count(*) FROM resolution), (SELECT count(*) FROM import_file)").fetchone()
+          print(f"run #1 result {sha}; resolutions {resolutions}; files {files}")
+          if (sha, resolutions, files) != (golden, 0, 3):
+              sys.exit("live is NOT the pristine demo after the reset")
+          print("live is the pristine demo")
+          PY

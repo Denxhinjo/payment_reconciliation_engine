@@ -32,7 +32,8 @@ stage reports.
 | F21 | Web end-to-end tests share one server and database across files | tests |
 | F22 | Sign-out is not origin-checked | web |
 | F23 | Upload size is checked after the body has been read | web |
-| F24 | The 15-minute worker schedule keeps the Neon database awake about a third of the time | operations |
+| F24 | The scheduled worker uses part of the free compute budget | operations |
+| F25 | No "Run now": queued work waits for the hourly worker | operations |
 
 ---
 
@@ -78,9 +79,9 @@ resolution.
 and the accounts are printed openly.
 **Stops being acceptable when:** any non-synthetic data, or any real user, is involved. That
 requires real authentication (SSO) and a preparer ≠ approver rule.
-**On the public deployment:** visitors can write permanent, append-only records. Options
-(nightly reset of a Neon branch; or read-only with a shared write password) are in
-`docs/proposal-public-writes.md` (D-085), awaiting the owner's decision.
+**On the public deployment:** visitors' writes would be permanent (append-only). Mitigated by the
+nightly reset of the `live` branch (D-085, D-086): writes last at most until 03:00 UTC. Still open:
+anyone can act as any synthetic user, and abuse is visible until the reset.
 
 ### F7: Append-only is enforced by triggers a database owner could drop
 **What:** triggers and role grants stop the application from editing history, but the table
@@ -199,16 +200,26 @@ before the body is read), and the demo has no untrusted signed-in users.
 **Stops being acceptable when:** the app is exposed to untrusted signed-in users. Then cap the
 request size at the platform or proxy, or check `Content-Length` first.
 
-### F24: The 15-minute worker schedule keeps the Neon database awake about a third of the time
-**What:** Neon's free plan pauses an idle database after 5 minutes ("scale to zero"; it cannot
-be disabled) and allows 100 compute-hours per project per month. Each worker run every 15 minutes
-wakes the database, which then stays awake about 5 minutes: roughly 240 hours a month at the
-smallest size (0.25 CU), about 60 of the 100 CU-hours before any visitor arrives.
-**Why acceptable now:** it fits within the allowance; nothing is deployed yet.
-**Stops being acceptable when:** visitor traffic plus the schedule approach 100 CU-hours, or a
-second scheduled job (e.g. the reset in D-085) is added. Then run the worker hourly, or only
-when the web app has queued work (e.g. triggered by `workflow_dispatch` from the app).
-*Found while checking free-plan limits for the D-085 proposal; recorded, not fixed (scope rule).*
+### F24: The scheduled worker uses part of the free compute budget
+**What:** Neon's free plan pauses an idle database after 5 minutes (cannot be disabled) and allows
+100 CU-hours **per project** per month (Plans page, read 2026-10-07; compute has no account-wide
+total, so the owner's other demo does not share this budget). Each hourly worker run wakes the
+database for about 5 minutes, about 15 CU-hours a month; the nightly reset check adds about 0.6.
+**Why acceptable now:** about 16 of 100 CU-hours before visitors (it was about 61 at every 15
+minutes, before D-087).
+**Stops being acceptable when:** visitor traffic plus the schedule approach 100 CU-hours (Neon then
+suspends compute until the next month). Run the worker only when there is queued work.
+
+### F25: No "Run now": queued work waits for the hourly worker
+**What:** "Replay this run" and "Queue reconciliation" only enqueue a job. The worker processes it
+at its next hourly run (minute 7), or when someone runs the workflow by hand in GitHub Actions. A
+visitor may wait up to an hour to see a replay or an upload's parse result.
+**Why acceptable now:** the page says "Replay pending" honestly, and the work is durable in the
+queue. Nothing is lost by waiting.
+**Stops being acceptable when:** the demo is shown live to someone waiting for a result. Then add a
+"Run now" that triggers the worker workflow (`workflow_dispatch`), which needs a GitHub token with
+"actions: write" stored in Vercel: a credential decision for the owner.
+*Recorded 2026-10-07 (D-087), after the owner's request assumed such a button already existed.*
 
 ---
 
