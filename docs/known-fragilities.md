@@ -214,8 +214,9 @@ suspends compute until the next month). Run the worker only when there is queued
 **What:** "Replay this run" and "Queue reconciliation" only enqueue a job. The worker processes it
 at its next hourly run (minute 7), or when someone runs the workflow by hand in GitHub Actions. A
 visitor may wait up to an hour to see a replay or an upload's parse result.
-**Why acceptable now:** the page says "Replay pending" honestly, and the work is durable in the
-queue. Nothing is lost by waiting.
+**Why acceptable now:** every queued job says when it will run ("the worker runs at 7 minutes past
+every hour"), and after 70 minutes says it is overdue instead, so a stopped worker is visible
+(D-088). The work is durable in the queue; nothing is lost by waiting.
 **Stops being acceptable when:** the demo is shown live to someone waiting for a result. Then add a
 "Run now" that triggers the worker workflow (`workflow_dispatch`), which needs a GitHub token with
 "actions: write" stored in Vercel: a credential decision for the owner.

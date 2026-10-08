@@ -58,7 +58,7 @@ WORKER_UPDATES = {"reconciliation_run", "job"}
 RUNNER_ONLY = {"schema_migration"}
 
 
-VIEWS = {"current_resolution", "exception_queue", "run_overview"}   # read-only for every role
+VIEWS = {"current_resolution", "exception_queue", "run_overview", "job_overview"}   # read-only for every role
 # Written only through requeue_failed_job() (SECURITY DEFINER), never directly (D-074).
 FUNCTION_WRITTEN = {"job_requeue"}
 

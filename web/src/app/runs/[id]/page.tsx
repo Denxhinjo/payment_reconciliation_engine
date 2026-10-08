@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Flash, flashFrom, Shell, StatusChip, type SearchParams } from "@/components/shell";
+import { Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
 import { parseId, requirePageStaff } from "@/lib/auth";
 import { formatTimestamp } from "@/lib/format";
 import { failedReplayJobs, getRun, pendingReplays, replaysOf, type RunOverview } from "@/lib/queries";
@@ -98,11 +98,11 @@ export default async function RunPage({ params, searchParams }: {
             <button type="submit" className="button">Replay this run</button>
           </form>
         ) : null}
-        {pending.length > 0 ? (
-          <p className="flash neutral">
-            Replay pending: job {pending.map((j) => `#${j.id} (${j.status})`).join(", ")}.
+        {pending.map((job) => (
+          <p key={job.id} className="flash neutral">
+            Replay pending (job #{job.id}). <QueueStatus status={job.status} overdue={job.overdue} />
           </p>
-        ) : null}
+        ))}
         {refused.map((job) => (
           <p key={job.id} className="flash bad">
             Replay job #{job.id} was refused and produced no run: {job.error}

@@ -61,7 +61,7 @@ def test_a_message_needing_a_reference_shows_nothing_without_a_valid_one(webapp,
 
 def test_a_known_code_renders_its_fixed_text(webapp, viewer):
     assert _shown(webapp, "/upload?notice=upload_stored&ref=12", viewer) == [
-        "Stored as file #12; queued for parsing."]
+        "Stored as file #12. Queued for parsing: the worker runs at 7 minutes past every hour."]
     assert _shown(webapp, "/jobs?error=job_attempts_exhausted&ref=7", viewer) == [
         "Job #7 has used its whole attempt budget and cannot be requeued. Requeue never resets "
         "attempts (poison-pill protection)."]
@@ -69,7 +69,7 @@ def test_a_known_code_renders_its_fixed_text(webapp, viewer):
 
 def test_a_reference_is_ignored_by_messages_that_take_none(webapp, viewer):
     assert _shown(webapp, "/runs?notice=replay_queued&ref=%3Cscript%3Ex%3C%2Fscript%3E", viewer) == [
-        "Replay queued."]
+        "Replay queued: the worker runs at 7 minutes past every hour."]
 
 
 def test_sign_in_errors_are_codes_too(webapp):

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Staff } from "@/lib/auth";
-import { flashMessage } from "@/lib/messages";
+import { flashMessage, OVERDUE_NOTE, QUEUED_NOTE, RUNNING_NOTE } from "@/lib/messages";
 
 /** The signed-in shell: navigation, who you are, sign out. Presentation only; every page and
  * every POST route enforces access itself (lib/auth.ts). */
@@ -57,4 +57,13 @@ export async function flashFrom(searchParams: SearchParams) {
     notice: flashMessage("notice", pick("notice"), pick("ref")),
     error: flashMessage("error", pick("error"), pick("ref")),
   };
+}
+
+/** When a queued job will run, or that it is overdue: the database decides `overdue` (D-088). */
+export function QueueStatus({ status, overdue }: { status: string; overdue: boolean }) {
+  if (status === "running") return <span className="queue-note">{RUNNING_NOTE}</span>;
+  if (status !== "queued") return null;
+  return overdue
+    ? <span className="queue-note bad-text" role="alert">{OVERDUE_NOTE}</span>
+    : <span className="queue-note">{QUEUED_NOTE}</span>;
 }

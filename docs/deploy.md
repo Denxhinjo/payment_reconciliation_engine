@@ -1,6 +1,7 @@
 # Deploying the reconciliation demo (Neon + Vercel + GitHub Actions)
 
-Exact steps for a **new** free Neon project and a **new** Vercel project. Follow them in order.
+Exact steps for the existing, empty free Neon project **`payment_reconciliation_engine`** and a
+**new** Vercel project. Follow them in order.
 Each step ends with a check, and **if a check fails, stop**: do not continue past a step that did
 not do what it says.
 
@@ -32,8 +33,9 @@ parent"), discarding whatever visitors did that day. Every page says so (decisio
 The owner credential is used only on your machine, and is never stored in Vercel or GitHub.
 
 **Verified on Neon** on 2026-10-07, on a throwaway project in this exact order, then deleted
-(D-086):
-- all ten migrations applied;
+(D-086). Migration 0011 (queue status, D-088) was written afterwards and has run only on local
+and CI Postgres 18; step 2 is its first run on Neon.
+- all ten migrations of the time applied;
 - the login roles were created with `IN ROLE` and passed the privilege check below;
 - the first reconciliation produced the golden hash, and the replay was identical;
 - `live` branched with roles and data intact;
@@ -43,7 +45,8 @@ The owner credential is used only on your machine, and is never stored in Vercel
 
 ## Order at a glance
 
-1. Create the Neon project (Postgres 18) and rename its root branch to `pristine`.
+1. Use the existing Neon project `payment_reconciliation_engine`; check it is empty; rename its
+   branch to `pristine`.
 2. Run the migrations on `pristine` (owner, from your machine).
 3. Create the two login roles on `pristine` (owner, Neon SQL Editor).
 4. Seed the synthetic staff on `pristine` (worker login).
@@ -76,19 +79,33 @@ Keep them in a password manager. They are not demo values.
 
 ---
 
-## 1. Create the Neon project and name the root branch `pristine` (you)
+## 1. Use the existing project `payment_reconciliation_engine` (you)
 
-- In the Neon console, create a new project. **Postgres version: 18.** The test suite and CI run
-  on 18 (D-040).
-- **Region:** close to the Vercel function region you will use in step 9 (e.g. Neon *AWS Europe
-  Central 1 (Frankfurt)* with Vercel `fra1`).
-- Keep the default database `neondb` and owner role `neondb_owner`.
-- **Rename the root branch** (called `main` or `production`) to **`pristine`**: Branches →
-  the branch → Rename.
+The project already exists in your Neon organisation:
+- id `weathered-star-14803706`;
+- region AWS Europe Central 1 (Frankfurt);
+- **Postgres 18** (the version the tests and CI run on, D-040);
+- one branch, `production`.
+
+A read-only check on 2026-10-08 found its database empty: no tables, and no roles besides
+Neon's own. The roles from the 2026-10-02 role test lived only on a temporary branch that was
+deleted.
+
+- **Rename its branch** `production` to **`pristine`**: Neon console → the project → Branches →
+  `production` → Rename.
+- **Confirm it is still empty**: SQL Editor, branch `pristine`, database `neondb`:
+
+  ```sql
+  SELECT count(*) AS tables FROM pg_tables WHERE schemaname = 'public';
+  ```
+
+  **Check:** `tables` is `0`. If it is not, stop: something was created since 2026-10-08.
 - From **Connect**, with branch `pristine` selected, copy the **direct** connection string for
   `neondb_owner` (host without `-pooler`, ending in `?sslmode=require`).
+- Note the project id `weathered-star-14803706`; step 8 needs it.
+- **Vercel region** (step 9): Frankfurt, `fra1`, next to the database.
 
-**Check:** the project has one branch, `pristine`, on Postgres 18.
+**Check:** the project has one branch, `pristine`, on Postgres 18, with no tables.
 
 ## 2. Run the migrations on `pristine` (you, owner)
 
@@ -97,7 +114,8 @@ cd worker
 .venv/Scripts/python -m recon migrate --database-url "<neondb_owner DIRECT string for pristine>"
 ```
 
-**Check:** the output lists exactly ten files, `0001_staff_and_files.sql` … `0010_job_lease.sql`.
+**Check:** the output lists exactly eleven files, `0001_staff_and_files.sql` …
+`0011_job_queue_status.sql`.
 Running it again must print `database is up to date`. If it prints `migration refused`, stop
 (D-035).
 
@@ -208,7 +226,7 @@ In the repository's **Settings → Secrets and variables → Actions**:
 |---|---|---|
 | Secret | `RECON_WORKER_DATABASE_URL` | WORKER_URL (`live`, direct, `recon_worker_login`) |
 | Secret | `NEON_API_KEY` | the project-scoped key |
-| Variable | `NEON_PROJECT_ID` | the project id (Settings → General in Neon, e.g. `abc-def-12345678`) |
+| Variable | `NEON_PROJECT_ID` | `weathered-star-14803706` |
 | Variable | `RECON_WORKER_ENABLED` | `true` |
 | Variable | `RECON_RESET_ENABLED` | `true` |
 
@@ -226,9 +244,8 @@ Then, under **Actions**, run each workflow once by hand:
 From then on the worker runs hourly at minute 7 (F24), and the reset nightly at 03:00 UTC. Both
 share one concurrency group, so a reset never interrupts a worker run.
 
-Note: GitHub disables scheduled workflows in a repository with no activity for 60 days. If the
-demo stops resetting or processing jobs after a quiet period, re-enable the workflows under
-**Actions**.
+**Important:** GitHub pauses these two scheduled workflows after 60 days without repository
+activity. See "If the demo stops resetting or processing jobs" below.
 
 ## 9. Vercel: the web UI
 
@@ -264,13 +281,44 @@ Replace `<app>` with your Vercel URL.
    curl -s -o /dev/null -w "%{http_code}\n" https://<app>/runs                          # 307
    curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<app>/api/jobs/1/requeue    # 401
    ```
-5. **Replay as a job:** on run #1 press **Replay this run**. The page shows "Replay queued" and
-   "Replay pending". There is no "Run now" button (F25): the replay appears after the next hourly
-   worker run, or at once if you run the **worker** workflow by hand.
-6. **Reset:** resolve one exception, then run **reset-demo** by hand. Afterwards the exception is
+5. **The replay proof is there at once:** run #1's page lists run #2 as a replay with outcome
+   **identical**, and both hashes equal `4962e880…67c7`. Nobody has to wait for anything. The
+   nightly reset checks this every night and fails if it is missing.
+6. **Replay as a job:** on run #1 press **Replay this run**. The page says *"Replay queued: the
+   worker runs at 7 minutes past every hour."* and lists *"Replay pending (job #N). Queued: the
+   worker runs at 7 minutes past every hour."* There is no "Run now" button (F25): the replay
+   appears after the next hourly worker run, or at once if you run the **worker** workflow by
+   hand. If the page instead says *"Queued for over 70 minutes: the worker should have run by
+   now…"*, the worker is not running: see the section below.
+7. **Reset:** resolve one exception, then run **reset-demo** by hand. Afterwards the exception is
    open again and your resolution is gone, and you are still signed in.
 
-If all six hold, the deployment matches what the tests and the Neon verification showed.
+If all seven hold, the deployment matches what the tests and the Neon verification showed.
+
+
+## If the demo stops resetting or processing jobs: GitHub's 60-day pause
+
+GitHub's documentation (*Disabling and enabling a workflow*) states: *"In a public repository,
+scheduled workflows are automatically disabled when no repository activity has occurred in 60
+days."* Both `worker` and `reset-demo` are scheduled workflows, so after two quiet months:
+
+- **Symptoms:** queued jobs never run, and the site says *"Queued for over 70 minutes: the worker
+  should have run by now…"* (D-088). Visitors' changes are no longer discarded at 03:00 UTC.
+- **To re-enable, in the browser:** the repository → **Actions** tab → choose **worker** in the
+  left sidebar → **Enable workflow**. Then do the same for **reset-demo**.
+- **Or with the GitHub CLI:**
+
+  ```sh
+  gh workflow enable worker.yml
+  gh workflow enable reset-demo.yml
+  ```
+
+- **Then** run each by hand once (step 8) to catch up, and check the reset ends with
+  `live is the pristine demo`.
+
+GitHub's page does not define exactly what counts as "repository activity", so this guide does not
+promise that any particular action prevents the pause. The site's overdue message is the signal
+to look.
 
 ## Afterwards
 

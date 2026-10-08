@@ -137,13 +137,13 @@ def test_replay_request_enqueues_a_job_and_returns_without_running_the_engine(we
     first = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     second = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     assert first.status == second.status == 303
-    assert _flash(webapp, first) == "Replay queued."
+    assert _flash(webapp, first) == "Replay queued: the worker runs at 7 minutes past every hour."
     assert _flash(webapp, second) == "A replay of this run is already pending; nothing changed."
     assert webapp.count("SELECT count(*) FROM job WHERE kind = 'replay' AND replay_of_run_id = %s "
                         "AND status = 'queued'", run) == 1
     assert webapp.count("SELECT count(*) FROM reconciliation_run") == runs_before   # no engine ran
     page = webapp.get(f"/runs/{run}", cookie=analyst).text
-    assert "Replay pending: job" in page
+    assert "Replay pending (job #" in page and "Queued: the worker runs at 7 minutes past every hour." in page
 
 
 def test_replay_of_a_failed_run_is_refused(webapp, analyst):
@@ -218,7 +218,7 @@ def test_resolve_then_correct_keeps_both_and_refusals_are_plain(webapp, analyst,
 def test_upload_stores_bytes_exactly_once_and_queues_one_parse(webapp, analyst):
     content = b"# SYNTHETIC DEMO DATA upload test\r\nentry_id,booked_on\r\n"
     first = webapp.upload(analyst, "ledger", "synthetic-upload.csv", content)
-    assert "queued for parsing" in _flash(webapp, first)
+    assert "Queued for parsing: the worker runs at 7 minutes past every hour." in _flash(webapp, first)
     second = webapp.upload(analyst, "ledger", "renamed.csv", content)
     assert "already imported as file #" in _flash(webapp, second)
     with webapp.db() as conn:
@@ -236,7 +236,8 @@ def test_reconcile_request_is_queued_once(webapp, analyst):
     second = webapp.post("/api/runs", cookie=analyst, form=form)
     assert "Reconciliation queued" in _flash(webapp, first)
     assert "already queued" in _flash(webapp, second)
-    assert webapp.count("SELECT count(*) FROM job WHERE kind = 'reconcile' AND status = 'queued'") == 1
+    assert webapp.count("SELECT count(*) FROM job WHERE kind = 'reconcile' AND status = 'queued' "
+                        "AND ledger_file_id = %s AND settlement_file_id = %s AND bank_file_id = %s", *files) == 1
 
 
 def test_reconcile_request_refuses_a_file_in_the_wrong_slot(webapp, analyst):
@@ -246,3 +247,40 @@ def test_reconcile_request_refuses_a_file_in_the_wrong_slot(webapp, analyst):
     response = webapp.post("/api/runs", cookie=analyst, form={
         "ledger_file_id": str(bank), "settlement_file_id": str(bank), "bank_file_id": str(bank)})
     assert "successfully parsed file of that kind" in _flash(webapp, response)
+
+
+# --- plain queue status (D-088) -------------------------------------------------------------------
+
+QUEUED_NOTE = "Queued: the worker runs at 7 minutes past every hour."
+OVERDUE_NOTE = "Queued for over 70 minutes: the worker should have run by now."
+
+
+def test_a_queued_replay_says_when_it_will_run_and_when_it_is_overdue(webapp, analyst):
+    run = webapp.seeded.identical_replay          # a finished run no other test replays
+    with webapp.db() as conn:
+        (job_id,) = conn.execute("INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', %s) RETURNING id",
+                                 (run,)).fetchone()
+    page = webapp.get(f"/runs/{run}", cookie=analyst).text
+    assert f"Replay pending (job #{job_id})." in page and QUEUED_NOTE in page and OVERDUE_NOTE not in page
+    with webapp.db() as conn:
+        conn.execute("UPDATE job SET queued_at = now() - interval '71 minutes' WHERE id = %s", (job_id,))
+    page = webapp.get(f"/runs/{run}", cookie=analyst).text
+    assert OVERDUE_NOTE in page and QUEUED_NOTE not in page
+
+
+def test_a_queued_reconciliation_and_a_queued_parse_show_the_schedule_on_the_upload_page(webapp, analyst):
+    with webapp.db() as conn:
+        ledger, settlement = conn.execute(
+            "SELECT ledger_file_id, settlement_file_id FROM reconciliation_run WHERE id = %s",
+            (webapp.seeded.run,)).fetchone()
+        (job_id,) = conn.execute(
+            "INSERT INTO job (kind, ledger_file_id, settlement_file_id, bank_file_id) "
+            "VALUES ('reconcile', %s, %s, %s) RETURNING id", (ledger, settlement, ledger)).fetchone()
+    webapp.upload(analyst, "bank", "synthetic-queued.xml", b"<!-- SYNTHETIC DEMO DATA queued parse -->")
+    page = webapp.get("/upload", cookie=analyst).text
+    assert "Requested reconciliations" in page and f"#{job_id}" in page
+    assert page.count(QUEUED_NOTE) >= 2            # the reconciliation and the file awaiting parsing
+
+
+def test_the_jobs_page_shows_the_queue_status(webapp, analyst):
+    assert QUEUED_NOTE in webapp.get("/jobs", cookie=analyst).text

@@ -1,4 +1,4 @@
-import { Flash, flashFrom, Shell, StatusChip, type SearchParams } from "@/components/shell";
+import { Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
 import { requirePageStaff } from "@/lib/auth";
 import { formatTimestamp } from "@/lib/format";
 import { listJobs, listRequeues } from "@/lib/queries";
@@ -33,7 +33,10 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
               <tr key={job.id}>
                 <td className="mono">#{job.id}</td>
                 <td className="mono">{job.kind}</td>
-                <td><StatusChip status={job.status} /></td>
+                <td>
+                  <StatusChip status={job.status} />
+                  <div className="small"><QueueStatus status={job.status} overdue={job.overdue} /></div>
+                </td>
                 <td className="num">{job.attempts} / {job.max_attempts}</td>
                 <td className="small">{job.error}</td>
                 <td className="mono small">{formatTimestamp(job.created_at)}</td>

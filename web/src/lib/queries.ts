@@ -69,16 +69,17 @@ export interface JobRow {
   created_at: Date;
   finished_at: Date | null;
   requeues: string;
+  overdue: boolean;            // decided by the database (job_overview, D-088)
 }
 
-const JOB_COLUMNS = `j.id::text, j.kind, j.status, j.attempts, recon_max_job_attempts() AS max_attempts,
-  j.error, j.import_file_id::text, j.replay_of_run_id::text, j.run_id::text, j.created_at, j.finished_at,
-  (SELECT count(*) FROM job_requeue q WHERE q.job_id = j.id)::text AS requeues`;
+const JOB_COLUMNS = `j.id::text, j.kind, j.status, j.attempts, j.max_attempts, j.error,
+  j.import_file_id::text, j.replay_of_run_id::text, j.run_id::text, j.created_at, j.finished_at,
+  j.requeues::text, j.overdue`;
 
 /** Replay jobs for a run that have not finished: shown as "replay pending". */
 export async function pendingReplays(runId: string): Promise<JobRow[]> {
   const { rows } = await pool.query<JobRow>(
-    `SELECT ${JOB_COLUMNS} FROM job j WHERE j.kind = 'replay' AND j.replay_of_run_id = $1
+    `SELECT ${JOB_COLUMNS} FROM job_overview j WHERE j.kind = 'replay' AND j.replay_of_run_id = $1
        AND j.status IN ('queued', 'running') ORDER BY j.id`, [runId]);
   return rows;
 }
@@ -86,14 +87,22 @@ export async function pendingReplays(runId: string): Promise<JobRow[]> {
 /** Replay jobs for a run that failed or were refused (no replay run was ever recorded). */
 export async function failedReplayJobs(runId: string): Promise<JobRow[]> {
   const { rows } = await pool.query<JobRow>(
-    `SELECT ${JOB_COLUMNS} FROM job j WHERE j.kind = 'replay' AND j.replay_of_run_id = $1
+    `SELECT ${JOB_COLUMNS} FROM job_overview j WHERE j.kind = 'replay' AND j.replay_of_run_id = $1
        AND j.status = 'failed' ORDER BY j.id DESC`, [runId]);
+  return rows;
+}
+
+/** Requested reconciliations not yet computed: shown on the upload page with their status. */
+export async function pendingReconciles(): Promise<(JobRow & { files: string })[]> {
+  const { rows } = await pool.query<JobRow & { files: string }>(
+    `SELECT ${JOB_COLUMNS}, '#' || j.ledger_file_id || ', #' || j.settlement_file_id || ', #' || j.bank_file_id AS files
+       FROM job_overview j WHERE j.kind = 'reconcile' AND j.status IN ('queued', 'running') ORDER BY j.id`);
   return rows;
 }
 
 export async function listJobs(): Promise<JobRow[]> {
   const { rows } = await pool.query<JobRow>(
-    `SELECT ${JOB_COLUMNS} FROM job j ORDER BY j.id DESC LIMIT 200`);
+    `SELECT ${JOB_COLUMNS} FROM job_overview j ORDER BY j.id DESC LIMIT 200`);
   return rows;
 }
 
@@ -125,16 +134,20 @@ export interface ImportFileRow {
   parse_status: "parsed" | "rejected" | null;
   parse_error: string | null;
   parser_version: string | null;
+  parse_job_status: string | null;
+  parse_job_overdue: boolean | null;
 }
 
 export async function listImportFiles(): Promise<ImportFileRow[]> {
   const { rows } = await pool.query<ImportFileRow>(
     `SELECT f.id::text, f.kind, f.original_name, encode(f.sha256, 'hex') AS sha256,
             octet_length(f.raw)::text AS byte_size, s.display_name AS uploaded_by, f.uploaded_at,
-            p.status AS parse_status, p.error AS parse_error, p.parser_version
+            p.status AS parse_status, p.error AS parse_error, p.parser_version,
+            pj.status AS parse_job_status, pj.overdue AS parse_job_overdue
        FROM import_file f
        JOIN staff_user s ON s.id = f.uploaded_by
        LEFT JOIN import_parse p ON p.import_file_id = f.id
+       LEFT JOIN job_overview pj ON pj.import_file_id = f.id AND pj.kind = 'parse_file'
       ORDER BY f.id DESC LIMIT 200`);
   return rows;
 }

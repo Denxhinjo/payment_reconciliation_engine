@@ -1070,3 +1070,62 @@ to an hour unless someone runs the workflow by hand in GitHub. Recorded as F25, 
 
 This is an estimate, not a measurement: Neon's autoscaling (up to 2 CU on the free plan) could
 use more under real load.
+
+## Queue status in plain words; deploy on the existing project, 2026-10-08
+
+### D-088: Every queued job says when it will run, or that it is overdue
+**Status:** accepted (owner request)
+**What it does:** wherever a queued job appears, the page says *"Queued: the worker runs at 7
+minutes past every hour."* That covers a replay on the run page, a file awaiting parsing and a
+requested reconciliation on the upload page, and every queued job on the jobs page. A job queued
+for more than 70 minutes says instead *"Queued for over 70 minutes: the worker should have run by
+now. It may be paused or failing; check the worker workflow in GitHub Actions."* A running job
+says *"Running now."* The confirmations after uploading, reconciling and replaying also state the
+schedule.
+**Mechanism:**
+- Migration 0011 adds `job.queued_at`, the time a job last entered the queue. A requeue restarts
+  it; using `created_at` would make a requeued job look overdue at once.
+- `recon_queue_overdue_after()` (70 minutes) is the single definition of "overdue".
+- The read-only view `job_overview` decides `overdue` for every job; the UI only shows the
+  database's answer (D-076).
+- The schedule sentence lives once in `messages.ts`, and a test fails if its minute stops
+  matching the cron in `worker.yml`.
+**Why 70 minutes:** the worker runs hourly; a job queued just after a run waits about 60 minutes
+plus the run's own time. 70 leaves room for GitHub's scheduling delay without hiding a worker that
+has stopped.
+**Tested:**
+- 0 and 69 minutes are not overdue; 71 and 500 are;
+- running and failed jobs are never overdue;
+- a requeue restarts the clock;
+- the threshold and the UI text agree;
+- the schedule sentence matches the cron;
+- over HTTP, a queued replay shows the schedule and, after 71 minutes, only the overdue text;
+- a queued reconciliation and a file awaiting parsing show it on the upload page;
+- the jobs page shows it.
+
+With the threshold changed to 700 minutes on purpose, exactly the three threshold tests failed.
+**What it does NOT guarantee:**
+- The 70 minutes is a heuristic. GitHub sometimes delays scheduled runs, so a healthy worker can
+  occasionally show "overdue" for a few minutes.
+- It says the worker *should have run*, not *why* it did not (paused by GitHub after 60 days,
+  failing, or a secret missing).
+- A job that is *running* past its lease is handled by the lease sweep (D-081), not by this
+  message.
+
+### D-089: The deployed demo opens with the replay proof; the nightly reset checks it
+**Status:** accepted (owner request)
+**Confirmed by construction:** deploy step 6 creates run #1 and its replay (run #2, outcome
+`identical`) on `pristine` before `live` is branched, so `live` starts with both, and every
+reset restores them. On the 2026-10-07 Neon verification the replay was identical on `pristine`,
+and after the reset run #1 still had the golden hash. The replay itself was not separately
+asserted after that reset.
+**Now checked every night:** the reset workflow's verification also requires run #2 to be an
+identical replay of run #1; otherwise the workflow fails visibly. A test extracts that script
+from `reset-demo.yml` and runs it for real: it passes on a database prepared as `pristine` is, and
+fails on an empty database and on one where a visitor's resolution survived.
+**Also:** `docs/deploy.md` step 1 now uses the existing empty project
+`payment_reconciliation_engine` (`weathered-star-14803706`, Frankfurt, Postgres 18; read-only
+check on 2026-10-08: no tables, no custom roles), renaming its branch `production` to
+`pristine`. The runbook has a section on GitHub's 60-day pause of scheduled workflows in public
+repositories (quoted from GitHub's documentation), with how to re-enable them in the browser or
+with `gh workflow enable`.

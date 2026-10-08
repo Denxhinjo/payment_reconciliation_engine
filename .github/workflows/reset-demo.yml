@@ -34,7 +34,8 @@ jobs:
           NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
 
       # Fail visibly unless live is now exactly the prepared demo: run #1 with the golden result,
-      # no resolutions, and only the three demo files.
+      # run #2 an identical replay of it (the replay proof a visitor sees at once, without
+      # waiting for the worker), no resolutions, and only the three demo files.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,11 +50,12 @@ jobs:
           import psycopg
           golden = list(json.load(open("tests/golden/results.json"))["1.0.0"].values())[0]
           with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
-              sha, resolutions, files = conn.execute(
+              sha, replay, resolutions, files = conn.execute(
                   "SELECT (SELECT result_sha256 FROM run_overview WHERE run_id = 1),"
+                  " (SELECT replay_outcome FROM run_overview WHERE run_id = 2 AND replay_of_run_id = 1),"
                   " (SELECT count(*) FROM resolution), (SELECT count(*) FROM import_file)").fetchone()
-          print(f"run #1 result {sha}; resolutions {resolutions}; files {files}")
-          if (sha, resolutions, files) != (golden, 0, 3):
+          print(f"run #1 result {sha}; run #2 replay {replay}; resolutions {resolutions}; files {files}")
+          if (sha, replay, resolutions, files) != (golden, "identical", 0, 3):
               sys.exit("live is NOT the pristine demo after the reset")
           print("live is the pristine demo")
           PY
