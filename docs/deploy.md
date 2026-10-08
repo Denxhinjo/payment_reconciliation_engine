@@ -249,6 +249,12 @@ activity. See "If the demo stops resetting or processing jobs" below.
 
 ## 9. Vercel: the web UI
 
+- **Deployed 2026-10-08 (D-090)** as `payment-reconciliation-demo`, at
+  https://payment-reconciliation-demo.vercel.app. `web/vercel.json` declares the framework
+  (`nextjs`) and region (`fra1`), and `web/package.json` the Node version (`22.x`). These come
+  from the repository, whatever the dashboard says. Without the framework declared, a
+  project created outside the import flow is built as a static site, and the deployment
+  fails looking for `public/`.
 - **Add New → Project →** import `Denxhinjo/payment_reconciliation_engine`.
 - **Root Directory: `web`.** The framework is detected as Next.js; leave build settings as
   default.
@@ -327,6 +333,14 @@ to look.
   undone at the next reset. Never edit an applied migration; the runner refuses (D-035).
 - **Rotating `SESSION_SECRET`** signs everyone out. That is harmless: sessions are only demo
   identities.
+- **Rotating a database password:** change it on **`pristine`** (Neon SQL Editor, branch
+  `pristine`: `ALTER ROLE recon_web_login PASSWORD '<new>';`), then run **reset-demo** so `live`
+  gets it. A change made on `live` alone is undone at the next reset. Then update the matching
+  secret: Vercel `DATABASE_URL` for the web login (and redeploy), GitHub
+  `RECON_WORKER_DATABASE_URL` for the worker login. The passwords from the first deployment exist
+  only in those two places; nobody holds a copy.
+- **Rotating the Neon API key:** create a new project-scoped key, set it as the GitHub secret
+  `NEON_API_KEY`, run **reset-demo** once to check it, then revoke the old key in Neon.
 - **Do not run the test suite against Neon.** Tests create and drop databases and need a
   superuser (see `README.md`, "Running the tests").
 - **What the reset does not guarantee** (D-085, D-086): visitors' changes stay visible until the

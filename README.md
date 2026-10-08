@@ -4,6 +4,9 @@
 > "Orrery Payments" (the payment processor) and "Demo Bank" are fictional. No real people,
 > accounts, IBANs or transactions are used anywhere.
 
+**Live demo:** https://payment-reconciliation-demo.vercel.app (synthetic data; resets every night
+at 03:00 UTC).
+
 A reconciliation engine that matches a fintech's internal ledger, its payment processor's
 settlement report, and its bank statement. It puts only the genuine differences in front of
 a human, and can recompute any past reconciliation byte for byte.

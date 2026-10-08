@@ -1129,3 +1129,49 @@ check on 2026-10-08: no tables, no custom roles), renaming its branch `productio
 `pristine`. The runbook has a section on GitHub's 60-day pause of scheduled workflows in public
 repositories (quoted from GitHub's documentation), with how to re-enable them in the browser or
 with `gh workflow enable`.
+
+## Deployment, 2026-10-08
+
+### D-090: Deployed to Neon, Vercel and GitHub Actions, following docs/deploy.md
+**Status:** accepted (owner asked for the deployment to be carried out; all steps confirmed)
+**Live:** https://payment-reconciliation-demo.vercel.app. Vercel project `payment-reconciliation-demo`
+(Hobby, functions in `fra1`); Neon project `payment_reconciliation_engine`
+(`weathered-star-14803706`, Frankfurt, Postgres 18.6), branches `pristine` (root) and `live`.
+Deployed from commit `6a776cf`; run #1 records engine commit `2d9252e`, the code it ran on.
+**Every runbook check passed:**
+1. The branch was renamed `production` → `pristine`, with 0 tables before starting.
+2. Eleven migrations applied on Neon, then "up to date". This was 0011's first run on Neon.
+3. Login roles created; 7/7 privilege checks as expected.
+4–6. 653 / 612 / 67 rows imported; run #1 with 65 matches and 7 exceptions, and the **golden
+   hash** `4962e880…67c7`; replay identical.
+7. `live` branched from `pristine`: 7 open exceptions; replay #2 identical; the web login reaches
+   it through the pooled host.
+8. A project-scoped Neon API key was created, and the GitHub secrets and variables set. Both
+   workflows were run by hand: the worker processed 0 jobs, and the reset printed "live is the
+   pristine demo".
+9. Built on Vercel, with every route dynamic except `/_not-found`.
+10. A smoke test of 20 checks over HTTPS, all passing:
+    - sign-in page with banner, reset line and the three public accounts;
+    - functions answering from `fra1`;
+    - run #1 and replay #2 identical with the golden hash, visible at once;
+    - 7 open exceptions;
+    - anonymous `/runs` redirected (307) and anonymous requeue refused (401);
+    - a replay queued with the schedule sentence, processed by the worker, shown identical;
+    - an exception resolved (6 open), then the reset run: still signed in, 7 open again, the
+      resolution and the extra replay gone.
+
+**Two problems on the way, both fixed at the cause:**
+- The project was created with `vercel project add`, so Vercel did not detect Next.js and looked
+  for a static `public/` folder. The first production deployment errored and nothing went live.
+  Fixed by declaring `"framework": "nextjs"` in `web/vercel.json`. The region (`fra1`) and Node
+  version (`engines.node: 22.x`) are versioned there too, rather than only in the dashboard.
+- The globally installed Vercel CLI hung without output in this shell; `npx vercel@latest` (the
+  same version) worked. This was an environment problem, not part of the deployment.
+
+**Credentials:** generated for this deployment (two database passwords, the session secret, the
+project-scoped API key). They exist only in GitHub Actions secrets and Vercel environment
+variables (stored as hidden secrets). The local copies were deleted after use. To rotate any of
+them, see docs/deploy.md, "Afterwards".
+**What it does not guarantee:** everything in D-085 and D-086 (the reset) and D-088 (queue
+status), and the open entries in docs/known-fragilities.md. In particular F6 (anyone can sign in
+as any synthetic user) and F25 (no "Run now").
