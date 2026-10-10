@@ -11,7 +11,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from recon import engine, importer, runs
+from recon import engine, importer, jobs, runs
 from recon.engine import ENGINE_VERSION
 from recon.migrate import migrate
 from tests.conftest import fresh_database
@@ -137,19 +137,17 @@ def test_replay_of_a_failed_or_missing_run_is_refused(conn, build):
         runs.replay(conn, 987654321)
 
 
-def test_replay_job_runs_and_points_at_the_replay(conn, run_id):
-    (job_id,) = conn.execute("INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', %s) RETURNING id",
-                             (run_id,)).fetchone()
+def test_replay_job_runs_and_points_at_the_replay(conn, run_id, build):
+    job_id = jobs.enqueue_replay(conn, run_id, build.staff())
     processed, outcome = runs.process_replay_job(conn)
     assert processed == job_id and outcome.identical
     assert conn.execute("SELECT status, run_id FROM job WHERE id = %s", (job_id,)).fetchone() == (
         "done", outcome.replay_run_id)
 
 
-def test_refused_replay_job_fails_with_the_reason(conn, run_id, monkeypatch):
+def test_refused_replay_job_fails_with_the_reason(conn, run_id, build, monkeypatch):
     monkeypatch.setattr(runs, "ENGINE_VERSION", "2.0.0")
-    (job_id,) = conn.execute("INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', %s) RETURNING id",
-                             (run_id,)).fetchone()
+    job_id = jobs.enqueue_replay(conn, run_id, build.staff())
     _, reason = runs.process_replay_job(conn)
     assert "engine-v1.0.0" in reason
     status, error = conn.execute("SELECT status, error FROM job WHERE id = %s", (job_id,)).fetchone()

@@ -1,4 +1,4 @@
-import { Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
+import { Actor, Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
 import { requirePageStaff } from "@/lib/auth";
 import { formatTimestamp } from "@/lib/format";
 import { listJobs, listRequeues } from "@/lib/queries";
@@ -26,7 +26,7 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
         </p>
         <table className="table">
           <thead>
-            <tr><th>Job</th><th>Kind</th><th>Status</th><th className="num">Attempts</th><th>Error</th><th>Created</th><th /></tr>
+            <tr><th>Job</th><th>Kind</th><th>Status</th><th className="num">Attempts</th><th>Error</th><th>Requested by</th><th>Created</th><th /></tr>
           </thead>
           <tbody>
             {jobs.map((job) => (
@@ -39,6 +39,7 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
                 </td>
                 <td className="num">{job.attempts} / {job.max_attempts}</td>
                 <td className="small">{job.error}</td>
+                <td><Actor name={job.requested_by_name} role={job.requested_by_role} /></td>
                 <td className="mono small">{formatTimestamp(job.created_at)}</td>
                 <td>
                   {job.status === "failed" && canRequeue ? (

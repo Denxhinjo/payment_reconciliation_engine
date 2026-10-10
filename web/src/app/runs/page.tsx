@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Flash, flashFrom, Shell, StatusChip, type SearchParams } from "@/components/shell";
+import { Actor, Flash, flashFrom, Shell, StatusChip, type SearchParams } from "@/components/shell";
 import { requirePageStaff } from "@/lib/auth";
 import { formatTimestamp, shortHash } from "@/lib/format";
 import { listRuns } from "@/lib/queries";
@@ -23,7 +23,7 @@ export default async function RunsPage({ searchParams }: { searchParams: SearchP
           <table className="table">
             <thead>
               <tr>
-                <th>Run</th><th>Status</th><th>Engine</th><th>Started</th>
+                <th>Run</th><th>Status</th><th>Engine</th><th>Requested by</th><th>Started</th>
                 <th className="num">Matches</th><th className="num">Exceptions</th>
                 <th className="num">Open</th><th>Result hash</th><th>Replay of</th>
               </tr>
@@ -37,6 +37,7 @@ export default async function RunsPage({ searchParams }: { searchParams: SearchP
                     {run.status === "failed" ? <div className="dim small">{run.error}</div> : null}
                   </td>
                   <td className="mono">{run.engine_version}</td>
+                  <td><Actor name={run.requested_by_name} role={run.requested_by_role} /></td>
                   <td className="mono">{formatTimestamp(run.started_at)}</td>
                   <td className="num">{run.matches}</td>
                   <td className="num">{run.exceptions}</td>

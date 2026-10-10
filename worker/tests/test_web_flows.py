@@ -13,7 +13,7 @@ import pytest
 
 WEB_SRC = Path(__file__).resolve().parents[2] / "web" / "src"
 BANNER = "DEMO — SYNTHETIC DATA"
-RESET_NOTICE = "This demo resets every night at 03:00 UTC; anything you change is discarded then."
+RESET_NOTICE = "This demo resets once a day, usually around 03:00 UTC; anything you change is discarded then."
 
 
 @pytest.fixture(scope="module")
@@ -258,8 +258,8 @@ OVERDUE_NOTE = "Queued for over 70 minutes: the worker should have run by now."
 def test_a_queued_replay_says_when_it_will_run_and_when_it_is_overdue(webapp, analyst):
     run = webapp.seeded.identical_replay          # a finished run no other test replays
     with webapp.db() as conn:
-        (job_id,) = conn.execute("INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', %s) RETURNING id",
-                                 (run,)).fetchone()
+        (job_id,) = conn.execute("SELECT enqueue_replay(%s, %s)",
+                                 (run, webapp.seeded.staff["Demo Analyst 1"])).fetchone()
     page = webapp.get(f"/runs/{run}", cookie=analyst).text
     assert f"Replay pending (job #{job_id})." in page and QUEUED_NOTE in page and OVERDUE_NOTE not in page
     with webapp.db() as conn:
@@ -274,8 +274,8 @@ def test_a_queued_reconciliation_and_a_queued_parse_show_the_schedule_on_the_upl
             "SELECT ledger_file_id, settlement_file_id FROM reconciliation_run WHERE id = %s",
             (webapp.seeded.run,)).fetchone()
         (job_id,) = conn.execute(
-            "INSERT INTO job (kind, ledger_file_id, settlement_file_id, bank_file_id) "
-            "VALUES ('reconcile', %s, %s, %s) RETURNING id", (ledger, settlement, ledger)).fetchone()
+            "SELECT enqueue_reconcile(%s, %s, %s, %s)",
+            (ledger, settlement, ledger, webapp.seeded.staff["Demo Analyst 1"])).fetchone()
     webapp.upload(analyst, "bank", "synthetic-queued.xml", b"<!-- SYNTHETIC DEMO DATA queued parse -->")
     page = webapp.get("/upload", cookie=analyst).text
     assert "Requested reconciliations" in page and f"#{job_id}" in page

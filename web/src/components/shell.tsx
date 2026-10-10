@@ -48,6 +48,15 @@ export function StatusChip({ status }: { status: string | null }) {
   return <span className={`chip ${tone[status] ?? "neutral"}`}>{status}</span>;
 }
 
+/** Who did something. The system actor ("Deployment seed") is labelled as such everywhere a name
+ * appears, so seeded records are never mistaken for a person's work (D-091). */
+export function Actor({ name, role }: { name: string | null; role: string | null }) {
+  if (!name) return <span className="dim">—</span>;
+  return role === "system"
+    ? <>{name} <span className="chip neutral">system actor</span></>
+    : <>{name}</>;
+}
+
 export type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export async function flashFrom(searchParams: SearchParams) {

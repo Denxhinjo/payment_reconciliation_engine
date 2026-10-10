@@ -30,13 +30,15 @@ export interface RunOverview {
   matches_gross_net: string;
   matches_many_to_one: string;
   exceptions_open: string;
+  requested_by_name: string | null;   // requester of the job that made the run (D-091)
+  requested_by_role: string | null;
 }
 
 const RUN_COLUMNS = `run_id::text, engine_version, engine_git_sha, status, error, started_at, finished_at,
   result_sha256, ledger_file_id::text, ledger_sha256, settlement_file_id::text, settlement_sha256,
   bank_file_id::text, bank_sha256, replay_of_run_id::text, replay_outcome, original_result_sha256,
   matches::text, exceptions::text, matches_exact::text, matches_gross_net::text,
-  matches_many_to_one::text, exceptions_open::text`;
+  matches_many_to_one::text, exceptions_open::text, requested_by_name, requested_by_role`;
 
 export async function listRuns(): Promise<RunOverview[]> {
   const { rows } = await pool.query<RunOverview>(
@@ -70,11 +72,13 @@ export interface JobRow {
   finished_at: Date | null;
   requeues: string;
   overdue: boolean;            // decided by the database (job_overview, D-088)
+  requested_by_name: string;   // who asked for the job (D-091)
+  requested_by_role: string;
 }
 
 const JOB_COLUMNS = `j.id::text, j.kind, j.status, j.attempts, j.max_attempts, j.error,
   j.import_file_id::text, j.replay_of_run_id::text, j.run_id::text, j.created_at, j.finished_at,
-  j.requeues::text, j.overdue`;
+  j.requeues::text, j.overdue, j.requested_by_name, j.requested_by_role`;
 
 /** Replay jobs for a run that have not finished: shown as "replay pending". */
 export async function pendingReplays(runId: string): Promise<JobRow[]> {
@@ -130,6 +134,7 @@ export interface ImportFileRow {
   sha256: string;
   byte_size: string;
   uploaded_by: string;
+  uploaded_by_role: string;
   uploaded_at: Date;
   parse_status: "parsed" | "rejected" | null;
   parse_error: string | null;
@@ -141,7 +146,8 @@ export interface ImportFileRow {
 export async function listImportFiles(): Promise<ImportFileRow[]> {
   const { rows } = await pool.query<ImportFileRow>(
     `SELECT f.id::text, f.kind, f.original_name, encode(f.sha256, 'hex') AS sha256,
-            octet_length(f.raw)::text AS byte_size, s.display_name AS uploaded_by, f.uploaded_at,
+            octet_length(f.raw)::text AS byte_size, s.display_name AS uploaded_by, s.role AS uploaded_by_role,
+            f.uploaded_at,
             p.status AS parse_status, p.error AS parse_error, p.parser_version,
             pj.status AS parse_job_status, pj.overdue AS parse_job_overdue
        FROM import_file f
@@ -256,8 +262,9 @@ export interface StaffRow {
   role: string;
 }
 
+/** The accounts offered on the sign-in page. Never the system actor, which cannot sign in. */
 export async function syntheticStaff(): Promise<StaffRow[]> {
   const { rows } = await pool.query<StaffRow>(
-    "SELECT id::text, display_name, role FROM staff_user WHERE is_synthetic ORDER BY display_name");
+    "SELECT id::text, display_name, role FROM staff_user WHERE is_synthetic AND role <> 'system' ORDER BY display_name");
   return rows;
 }

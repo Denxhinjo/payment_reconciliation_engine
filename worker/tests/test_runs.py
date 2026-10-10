@@ -10,7 +10,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from recon import engine, importer, runs
+from recon import engine, importer, jobs, runs
 from recon.engine import reconcile
 from recon.migrate import migrate
 from tests.conftest import fresh_database
@@ -144,11 +144,9 @@ def test_engine_version_and_git_sha_are_recorded(conn, demo_files):
                         (run_id,)).fetchone() == ("1.0.0", "synthetic-sha")
 
 
-def test_reconcile_job_runs_and_points_at_its_run(conn, demo_files):
-    (job_id,) = conn.execute(
-        "INSERT INTO job (kind, ledger_file_id, settlement_file_id, bank_file_id) "
-        "VALUES ('reconcile', %s, %s, %s) RETURNING id",
-        (demo_files["ledger"], demo_files["settlement"], demo_files["bank"])).fetchone()
+def test_reconcile_job_runs_and_points_at_its_run(conn, staff, demo_files):
+    job_id = jobs.enqueue_reconcile(conn, demo_files["ledger"], demo_files["settlement"],
+                                    demo_files["bank"], staff)
     processed_job, outcome = runs.process_reconcile_job(conn)
     assert processed_job == job_id and outcome.status == "finished"
     assert conn.execute("SELECT status, run_id FROM job WHERE id = %s", (job_id,)).fetchone() == (

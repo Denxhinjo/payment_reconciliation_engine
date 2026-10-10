@@ -68,6 +68,11 @@ def main(argv: list[str] | None = None) -> int:
     _database_argument(replay_cmd)
     replay_cmd.add_argument("--run", type=int, required=True)
 
+    seed_demo_cmd = commands.add_parser(
+        "seed-demo", help="seed an empty database with the demo month, run #1 and its replay, "
+                          "through the job path, as the system actor 'Deployment seed'")
+    _database_argument(seed_demo_cmd)
+
     queue_cmd = commands.add_parser("queue", help="list a run's exceptions")
     _database_argument(queue_cmd)
     queue_cmd.add_argument("--run", type=int, required=True)
@@ -169,6 +174,28 @@ def main(argv: list[str] | None = None) -> int:
                       + ("IDENTICAL" if replay.identical else "DIFFERENT"))
         print(f"{len(outcomes)} parse job(s), {len(reconciled)} reconcile job(s) and "
               f"{len(replayed)} replay job(s) processed")
+        return 0
+
+    if args.command == "seed-demo":
+        from recon import seed
+
+        try:
+            expected = seed.golden_sha256()
+            with _connect(parser, args.database_url) as conn:
+                report = seed.seed_demo(conn, expected_sha256=expected, engine_git_sha=git_sha)
+        except Exception as exc:
+            print(f"SEED FAILED, nothing kept: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        print(f"files #{report.file_ids[0]}, #{report.file_ids[1]}, #{report.file_ids[2]} "
+              f"uploaded and parsed as {seed.SYSTEM_ACTOR!r}")
+        print(f"run #{report.run_id}: {report.matches} matches, {report.exceptions} exceptions")
+        print(f"  golden result sha256 {expected}")
+        print(f"  run    result sha256 {report.run_sha256}")
+        print(f"run #{report.replay_run_id} replays run #{report.run_id}: IDENTICAL "
+              f"({report.replay_sha256})")
+        print(f"jobs {', '.join(f'#{j}' for j in report.job_ids)}: done, 1 attempt each, "
+              f"requested by {seed.SYSTEM_ACTOR!r}")
+        print("READY")
         return 0
 
     if args.command == "replay":

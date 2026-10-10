@@ -7,6 +7,9 @@ finish()  records the outcome, but only while this worker still holds the lease.
           lapsed and the job was swept meanwhile, the update matches nothing and LeaseLost is
           raised, so the caller's transaction (e.g. a parse's rows) rolls back rather than
           committing work for a job that is no longer this worker's.
+enqueue_reconcile(), enqueue_replay()
+          queue a job through the database functions of the same names, which the web app calls
+          too, so there is one way to enqueue (D-091). Each records who asked (requested_by).
 expire_leases()
           the sweep, run at the start of every worker invocation: jobs still 'running' past
           their lease become 'failed' ("lease expired: worker did not finish"), attempts kept.
@@ -84,3 +87,21 @@ def expire_leases(conn: psycopg.Connection) -> list[int]:
     """The sweep. Returns the ids of the jobs it marked failed."""
     with conn.transaction():
         return [job_id for (job_id,) in conn.execute("SELECT expire_job_leases()")]
+
+
+def enqueue_reconcile(conn: psycopg.Connection, ledger_file_id: int, settlement_file_id: int,
+                      bank_file_id: int, requested_by: int) -> int | None:
+    """Queue a reconcile job. None if one for the same three files is already pending (D-075)."""
+    with conn.transaction():
+        (job_id,) = conn.execute(
+            "SELECT enqueue_reconcile(%s, %s, %s, %s)",
+            (ledger_file_id, settlement_file_id, bank_file_id, requested_by),
+        ).fetchone()
+        return job_id
+
+
+def enqueue_replay(conn: psycopg.Connection, run_id: int, requested_by: int) -> int | None:
+    """Queue a replay job. None if a replay of that run is already pending (D-075)."""
+    with conn.transaction():
+        (job_id,) = conn.execute("SELECT enqueue_replay(%s, %s)", (run_id, requested_by)).fetchone()
+        return job_id

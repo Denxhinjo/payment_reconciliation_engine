@@ -32,7 +32,8 @@ export async function currentStaff(): Promise<Staff | null> {
   const staffId = await readSessionStaffId();
   if (!staffId) return null;
   const { rows } = await pool.query<{ id: string; display_name: string; role: Role }>(
-    "SELECT id::text, display_name, role FROM staff_user WHERE id = $1 AND is_synthetic",
+    // role <> 'system': a cookie naming the system actor counts as no session at all (D-091).
+    "SELECT id::text, display_name, role FROM staff_user WHERE id = $1 AND is_synthetic AND role <> 'system'",
     [staffId],
   );
   const row = rows[0];

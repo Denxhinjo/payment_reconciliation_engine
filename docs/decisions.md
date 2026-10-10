@@ -1175,3 +1175,86 @@ them, see docs/deploy.md, "Afterwards".
 **What it does not guarantee:** everything in D-085 and D-086 (the reset) and D-088 (queue
 status), and the open entries in docs/known-fragilities.md. In particular F6 (anyone can sign in
 as any synthetic user) and F25 (no "Run now").
+
+## Requesters and the deployment seed, 2026-10-10
+
+### D-091: Every job records who asked for it; seeded data belongs to a system actor
+**Status:** accepted (owner's request of 2026-10-10)
+**What:** `job.requested_by` (migration 0012) names the `staff_user` who asked for each job:
+- a web reconcile or replay names the signed-in user;
+- an upload's parse job names the uploader;
+- the demo seed names the **system actor**, a staff user called "Deployment seed" with the new
+  role `system`.
+
+The column is `NOT NULL`, and a trigger refuses any change to it once recorded (SQLSTATE RC006).
+The worker has UPDATE on `job` for status and attempts, but it cannot rewrite who asked.
+`job_overview` and `run_overview` show the requester's name and role. The jobs list, the file
+list and the run history label the system actor "system actor".
+**One way to enqueue:** enqueueing moved into three database functions:
+- `upload_file(kind, name, raw, uploaded_by)`: stores the file, idempotent by SHA-256, and
+  queues its parse job;
+- `enqueue_reconcile(ledger, settlement, bank, requested_by)`;
+- `enqueue_replay(run, requested_by)`.
+
+The web routes and the Python code (`importer.store_file`, `jobs.enqueue_*`) both call them. The
+web is TypeScript and the worker Python, so the only place one shared implementation can live is
+the database. Before this, each language had its own INSERT statements that happened to agree.
+Each function returns NULL for a request that is already pending (D-075). Each runs with the
+caller's privileges; only `recon_web` and `recon_worker` may execute them.
+**The system actor cannot sign in.** This is enforced in two places on the server, not by hiding
+it from the picker:
+- the sign-in endpoint refuses its id;
+- `currentStaff()` treats a session cookie naming it, even one correctly signed with the
+  server's secret, as no session (401 on every POST, redirect on every page).
+
+Tests post its id to the endpoint directly and forge such a cookie. Each test was checked to fail
+when its guard is removed.
+**Existing data:** the migration fills in parse jobs from their file's uploader, which is the truth.
+If a reconcile or replay job exists, nobody recorded who asked for it, so the migration **stops**
+(RC007) rather than invent a requester. A database with such jobs needs a decision, not a guess.
+The deployed `pristine` has no job rows at all (its runs were made with the CLI), so this
+refusal cannot fire there.
+**Why a system actor rather than a demo person:** the seeded run was not done by "Demo Analyst 1".
+Attributing it to a demo person would be a small false record in a system whose purpose is
+records that survive questioning.
+**What it does not guarantee:**
+- Runs made with the CLI's `recon reconcile` / `recon replay` have no job, so no requester
+  (`run_overview.requested_by_name` is NULL, shown as "—"). Recorded as F26.
+- Only the web refuses the system actor. A client with direct database access can still name it,
+  e.g. `recon resolve --staff "Deployment seed"`. Recorded as F27.
+- It does not make sign-in real: F6 stands.
+
+### D-092: The demo seed goes through the real job path, in one transaction, or not at all
+**Status:** accepted (owner's request of 2026-10-10)
+**What:** `recon seed-demo` fills an empty, migrated database with what the demo opens on,
+calling only code the application itself uses:
+1. the three demo files are uploaded with `upload_file()` as "Deployment seed";
+2. their parse jobs are run by the worker's `process_parse_job` (claim, attempt, lease, done);
+3. run #1 is queued with `enqueue_reconcile()` and run by `process_reconcile_job`;
+4. its result hash must equal the golden hash for this engine version (read from
+   `worker/tests/golden/results.json`, never written);
+5. run #2 is queued with `enqueue_replay()`, run by `process_replay_job`, and must be identical;
+6. every job must be `done` after exactly one attempt and name the system actor.
+
+It prints `READY` only after all of that is committed.
+**Fail closed:** the whole seed is one database transaction. The job functions nest inside it as
+savepoints, exactly as they do in the test fixture (D-056). Any failure rolls everything back:
+a parse rejection, a failed run, a hash differing from the golden value, a refused or different
+replay, or a crash. The database is then left with no files, jobs or runs, and the command exits
+1 with `SEED FAILED, nothing kept`. Tests force a wrong golden value and a crash after run #1
+finished, and both leave zero rows. The seed also refuses a database that already has files,
+jobs or runs.
+**Why one transaction, not a cleanup on failure:** a cleanup can itself fail, and append-only
+triggers would refuse it anyway. A rollback cannot leave half a seed.
+**What it does not guarantee:**
+- It runs the code of the checkout it is run from. `GITHUB_SHA` must be set to record that commit
+  (F15).
+- The single transaction means leases are timed from the transaction's start. That is harmless
+  for a seed that takes seconds, but `seed-demo` is not a worker.
+
+### D-093: The reset banner says "once a day, usually around 03:00 UTC"
+**Status:** accepted (owner's request of 2026-10-10)
+**Why:** GitHub Actions does not guarantee when a scheduled workflow starts; it can be delayed
+under load. The reset scheduled for 03:00 UTC on 9 October 2026 started at 09:57 UTC. "Every
+night at 03:00 UTC" promised a time nobody controls. The schedule itself (`0 3 * * *`) is
+unchanged. README, deploy.md and F6 now use the same wording.

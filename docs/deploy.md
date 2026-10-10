@@ -19,15 +19,16 @@ where a child branch starts as an exact copy of its **parent**):
   it afterwards.
 - **`live`**: a child of `pristine`. The website and the worker use only this one.
 
-Every night at 03:00 UTC a scheduled job **resets** `live` from `pristine` (Neon's "reset from
-parent"), discarding whatever visitors did that day. Every page says so (decision D-085).
+Once a day, scheduled for 03:00 UTC, a job **resets** `live` from `pristine` (Neon's "reset from
+parent"), discarding whatever visitors did that day. Every page says so (decision D-085). GitHub
+does not guarantee start times, so it usually runs around then, sometimes hours later (D-093).
 
 | Piece | Where | Connects as | To branch / connection |
 |---|---|---|---|
 | Migrations and demo seeding | your machine, by hand | `neondb_owner`, then `recon_worker_login` | `pristine`, direct |
 | Web UI (`web/`) | Vercel | `recon_web_login` (member of `recon_web`) | `live`, **pooled** |
 | Worker (`worker/`) | GitHub Actions, hourly | `recon_worker_login` (member of `recon_worker`) | `live`, direct |
-| Nightly reset | GitHub Actions, 03:00 UTC | a project-scoped Neon API key | resets `live` from `pristine` |
+| Daily reset | GitHub Actions, scheduled 03:00 UTC | a project-scoped Neon API key | resets `live` from `pristine` |
 | CI | GitHub Actions | none (its own Postgres service) | none |
 
 The owner credential is used only on your machine, and is never stored in Vercel or GitHub.
@@ -49,9 +50,9 @@ and CI Postgres 18; step 2 is its first run on Neon.
    branch to `pristine`.
 2. Run the migrations on `pristine` (owner, from your machine).
 3. Create the two login roles on `pristine` (owner, Neon SQL Editor).
-4. Seed the synthetic staff on `pristine` (worker login).
-5. Import the demo month on `pristine` (worker login).
-6. First reconciliation and replay on `pristine`; check the hash.
+4. Seed the demo on `pristine` through the job path (worker login); check the hash.
+5. Check what the seed left.
+6. Leave `pristine` alone from now on.
 7. Create the branch `live` from `pristine`; build the two connection strings for `live`.
 8. GitHub Actions: secrets and variables for the worker and the nightly reset; run each once.
 9. Vercel: create the project, set two environment variables, deploy.
@@ -114,8 +115,8 @@ cd worker
 .venv/Scripts/python -m recon migrate --database-url "<neondb_owner DIRECT string for pristine>"
 ```
 
-**Check:** the output lists exactly eleven files, `0001_staff_and_files.sql` …
-`0011_job_queue_status.sql`.
+**Check:** the output lists exactly twelve files, `0001_staff_and_files.sql` …
+`0012_job_requester.sql`.
 Running it again must print `database is up to date`. If it prints `migration refused`, stop
 (D-035).
 
@@ -150,45 +151,42 @@ reset restores them.
 Build **WORKER_URL_PRISTINE**: the `pristine` direct string, with user `recon_worker_login` and
 its password (keep `?sslmode=require`).
 
-## 4. Seed the synthetic staff on `pristine` (worker login)
+## 4. Seed the demo on `pristine` through the job path (worker login)
+
+One command, from `worker/`. `GITHUB_SHA` records the commit the engine ran from (otherwise the
+runs record none, F15):
 
 ```sh
-.venv/Scripts/python -m recon seed-staff --database-url "<WORKER_URL_PRISTINE>"
+GITHUB_SHA=$(git rev-parse HEAD) .venv/Scripts/python -m recon seed-demo --database-url "<WORKER_URL_PRISTINE>"
 ```
 
-**Check:** prints `synthetic staff: Demo Analyst 1, Demo Analyst 2, Demo Controller`.
+It creates the synthetic staff, then does what a user and the worker would do, as the system
+actor "Deployment seed" (D-091, D-092): it uploads the three demo files and runs their parse
+jobs, queues and runs the reconciliation (run #1), and queues and runs its replay (run #2). It is
+one transaction: if anything fails, nothing is kept and it prints `SEED FAILED, nothing kept`.
 
-## 5. Import the demo month on `pristine` (worker login)
+**Check:** the output contains
 
-From `worker/`, in this order (so the file ids are 1, 2, 3):
+```
+run #1: 65 matches, 7 exceptions
+  golden result sha256 4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7
+  run    result sha256 4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7
+run #2 replays run #1: IDENTICAL (4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7)
+```
+
+and the last line is `READY`. The golden hash is the result for engine 1.0.0
+(`worker/tests/golden/results.json`). The command itself refuses a different hash, and you
+should too: **stop**, never edit the golden value.
+
+## 5. Check what the seed left (worker login)
 
 ```sh
-.venv/Scripts/python -m recon import --database-url "<WORKER_URL_PRISTINE>" --kind ledger     --file ../demo-data/2026-09/synthetic_ledger_2026-09.csv
-.venv/Scripts/python -m recon import --database-url "<WORKER_URL_PRISTINE>" --kind settlement --file ../demo-data/2026-09/synthetic_orrery_settlement_2026-09.csv
-.venv/Scripts/python -m recon import --database-url "<WORKER_URL_PRISTINE>" --kind bank       --file ../demo-data/2026-09/synthetic_bank_camt053_2026-09.xml
+.venv/Scripts/python -m recon queue --database-url "<WORKER_URL_PRISTINE>" --run 1 --status open
 ```
 
-**Check:** `file #1 imported and parsed: 653 rows`, `file #2 … 612 rows`, `file #3 … 67 rows`.
+**Check:** ends with `7 exception(s), 7 open`.
 
-## 6. First reconciliation and replay on `pristine` (worker login)
-
-`GITHUB_SHA` records the commit the engine ran from (otherwise the run records none, F15):
-
-```sh
-GITHUB_SHA=$(git rev-parse HEAD) .venv/Scripts/python -m recon reconcile --database-url "<WORKER_URL_PRISTINE>" \
-    --ledger-file 1 --settlement-file 2 --bank-file 3
-.venv/Scripts/python -m recon replay --database-url "<WORKER_URL_PRISTINE>" --run 1
-```
-
-**Check:** the first command prints exactly
-
-```
-run #1 finished: 65 matches, 7 exceptions, result sha256 4962e8807d9a268581a698353b78c2d4ecce2551c8df340d2d7ea372285567c7
-```
-
-That hash is the golden result for engine 1.0.0 (`worker/tests/golden/results.json`). The second
-command must end with `IDENTICAL: the run was reproduced byte for byte`. Any other hash means the
-deployed code or data differs from what was tested: **stop**.
+## 6. Leave `pristine` alone
 
 `pristine` is now the clean image. **Do not connect anything to it again**, except to apply a
 future migration (see "Afterwards").
@@ -241,7 +239,8 @@ Then, under **Actions**, run each workflow once by hand:
    `live is the pristine demo`. The workflow itself fails if `live` is not exactly the prepared
    demo after the reset.
 
-From then on the worker runs hourly at minute 7 (F24), and the reset nightly at 03:00 UTC. Both
+From then on the worker runs hourly at minute 7 (F24), and the reset once a day, scheduled for
+03:00 UTC (D-093). Both
 share one concurrency group, so a reset never interrupts a worker run.
 
 **Important:** GitHub pauses these two scheduled workflows after 60 days without repository
@@ -276,10 +275,12 @@ activity. See "If the demo stops resetting or processing jobs" below.
 Replace `<app>` with your Vercel URL.
 
 1. `https://<app>/` shows the sign-in page, with the yellow banner reading **DEMO — SYNTHETIC
-   DATA** and *"This demo resets every night at 03:00 UTC; anything you change is discarded
-   then."*, and the three synthetic accounts listed openly.
+   DATA** and *"This demo resets once a day, usually around 03:00 UTC; anything you change is
+   discarded then."*, and the three synthetic accounts listed openly. "Deployment seed" is
+   **not** listed: it is the system actor and cannot sign in.
 2. Sign in as **Demo Analyst 1**. **Runs** shows run #1 (finished, 65 matches, 7 exceptions)
-   and run #2 (the replay from step 6, outcome `identical`).
+   and run #2 (the replay from step 4, outcome `identical`), both requested by
+   "Deployment seed" with the label **system actor**.
 3. **Run #1 → Open the exceptions queue**: seven open exceptions.
 4. With no session, from a terminal:
 

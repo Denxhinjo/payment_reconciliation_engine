@@ -5,7 +5,9 @@ import { sessionCookie } from "@/lib/session";
 
 /**
  * Sign in as a synthetic staff user: the demo picker (D-031). Public by design; the accounts are
- * printed on the sign-in page. Only users marked is_synthetic can be chosen.
+ * printed on the sign-in page. Only users marked is_synthetic can be chosen, and never the system
+ * actor ("Deployment seed", role 'system'): it records what no person did and cannot sign in,
+ * whatever id is posted here (D-091).
  */
 export async function POST(request: Request) {
   let staffId: string | null = null;
@@ -15,7 +17,7 @@ export async function POST(request: Request) {
     staffId = null;
   }
   if (!staffId) return backTo(request, "/login", { error: "signin_choose" });
-  const { rows } = await pool.query("SELECT 1 FROM staff_user WHERE id = $1 AND is_synthetic", [staffId]);
+  const { rows } = await pool.query("SELECT 1 FROM staff_user WHERE id = $1 AND is_synthetic AND role <> 'system'", [staffId]);
   if (rows.length === 0) return backTo(request, "/login", { error: "signin_unknown" });
 
   const cookie = sessionCookie(staffId);

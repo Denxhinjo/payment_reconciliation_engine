@@ -1,7 +1,8 @@
 """Import: store raw files idempotently, queue parse jobs, and process them.
 
 Flow (identical for the web upload and the CLI):
-1. ``store_file`` inserts the raw bytes. The database computes the SHA-256 and its unique
+1. ``store_file`` inserts the raw bytes through the database function ``upload_file()``, which
+   the web upload calls too. The database computes the SHA-256 and its unique
    constraint makes the import idempotent: the same bytes a second time create nothing, not
    even a job, and the caller is told which file they already are.
 2. A new file gets exactly one queued ``parse_file`` job.
@@ -72,24 +73,17 @@ def staff_id_by_name(conn: psycopg.Connection, name: str) -> int:
 
 def store_file(conn: psycopg.Connection, kind: str, original_name: str, raw: bytes,
                staff_id: int) -> StoredFile:
+    """Store the bytes and queue their parse job, requested by the uploader, through the
+    database function upload_file(): the same one the web upload calls (D-091)."""
     if kind not in FILE_KINDS:
         raise ValueError(f"unknown file kind {kind!r}; expected one of {FILE_KINDS}")
     with conn.transaction():
-        row = conn.execute(
-            "INSERT INTO import_file (kind, original_name, raw, uploaded_by) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (sha256) DO NOTHING RETURNING id",
+        file_id, stored_kind, created, job_id = conn.execute(
+            "SELECT stored_file_id, stored_kind, created, parse_job_id "
+            "FROM upload_file(%s, %s, %s, %s)",
             (kind, original_name, raw, staff_id),
         ).fetchone()
-        if row is None:
-            existing_id, existing_kind = conn.execute(
-                "SELECT id, kind FROM import_file WHERE sha256 = sha256(%s::bytea)", (raw,)
-            ).fetchone()
-            return StoredFile(existing_id, str(existing_kind), created=False, job_id=None)
-        (job_id,) = conn.execute(
-            "INSERT INTO job (kind, import_file_id) VALUES ('parse_file', %s) RETURNING id",
-            (row[0],),
-        ).fetchone()
-        return StoredFile(row[0], kind, created=True, job_id=job_id)
+        return StoredFile(file_id, str(stored_kind), created=created, job_id=job_id)
 
 
 def _insert_rows(conn: psycopg.Connection, file_id: int, kind: str, raw: bytes) -> int:

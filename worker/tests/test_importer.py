@@ -203,7 +203,8 @@ def test_worker_processes_jobs_queued_by_the_web_layer(conn, staff):
         "INSERT INTO import_file (kind, original_name, raw, uploaded_by) "
         "VALUES ('settlement', 'web-upload.csv', %s, %s) RETURNING id",
         (FILES["settlement"].read_bytes(), staff)).fetchone()
-    conn.execute("INSERT INTO job (kind, import_file_id) VALUES ('parse_file', %s)", (file_id,))
+    conn.execute("INSERT INTO job (kind, import_file_id, requested_by) VALUES ('parse_file', %s, %s)",
+                 (file_id, staff))
     (outcome,) = importer.run_parse_jobs(conn)
     assert (outcome.file_id, outcome.status, outcome.rows) == (file_id, "parsed", 612)
 

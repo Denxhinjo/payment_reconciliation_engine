@@ -4,8 +4,8 @@
 > "Orrery Payments" (the payment processor) and "Demo Bank" are fictional. No real people,
 > accounts, IBANs or transactions are used anywhere.
 
-**Live demo:** https://payment-reconciliation-demo.vercel.app (synthetic data; resets every night
-at 03:00 UTC).
+**Live demo:** https://payment-reconciliation-demo.vercel.app (synthetic data; resets once a day,
+usually around 03:00 UTC).
 
 A reconciliation engine that matches a fintech's internal ledger, its payment processor's
 settlement report, and its bank statement. It puts only the genuine differences in front of
@@ -189,19 +189,32 @@ statically. The demo month's result hash is pinned per engine version in
 that version's tag (`git checkout engine-v1.0.0`). A replay that does not reproduce the
 original is recorded and shown as such in `run_overview`, never hidden (D-068 to D-070).
 
+## Seeding the demo
+
+```sh
+cd worker
+.venv/Scripts/python -m recon seed-demo     # empty, migrated database only
+```
+
+Uploads the demo month, reconciles it (run #1) and replays it (run #2), all through the job queue
+and the worker's own code, as the system actor "Deployment seed". It checks run #1 against the
+golden hash and the replay for identity, all in one transaction: on any failure nothing is kept
+(D-092).
+
 ## The web UI
 
 A Next.js app in `web/`. It reads stored runs and views and never computes a figure itself
 (D-076). Pages:
 
-- **Sign in:** a "sign in as" picker over the synthetic staff. The accounts are public.
+- **Sign in:** a "sign in as" picker over the synthetic staff. The accounts are public. The
+  system actor "Deployment seed", which seeded the demo, cannot sign in (D-091).
 - **Runs:** every run, including failed ones and replays.
 - **Run detail:** the record, results, and replay status, which is one of identical, drifted
   (both hashes shown), failed to run, refused, or pending.
 - **Exceptions queue.**
 - **Exception detail:** evidence and resolution history, with forms to resolve or correct.
 - **Upload:** upload a file, and request a reconciliation.
-- **Jobs:** attempts and errors per job; requeue for controllers.
+- **Jobs:** attempts, errors and requester per job; requeue for controllers.
 
 Access is enforced on the server for every page and every POST, not by hiding buttons (D-077).
 Replays and reconciliations are queued as jobs for the worker (D-078). Requeue is idempotent and

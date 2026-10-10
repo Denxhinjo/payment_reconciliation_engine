@@ -1,4 +1,4 @@
-import { Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
+import { Actor, Flash, flashFrom, QueueStatus, Shell, StatusChip, type SearchParams } from "@/components/shell";
 import { requirePageStaff } from "@/lib/auth";
 import { formatTimestamp, shortHash } from "@/lib/format";
 import { listImportFiles, pendingReconciles } from "@/lib/queries";
@@ -88,7 +88,7 @@ export default async function UploadPage({ searchParams }: { searchParams: Searc
                   ) : null}
                   {f.parse_error ? <div className="small bad-text">{f.parse_error}</div> : null}
                 </td>
-                <td className="mono small">{f.uploaded_by}, {formatTimestamp(f.uploaded_at)}</td>
+                <td className="small"><Actor name={f.uploaded_by} role={f.uploaded_by_role} />, <span className="mono">{formatTimestamp(f.uploaded_at)}</span></td>
               </tr>
             ))}
           </tbody>

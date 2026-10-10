@@ -8,7 +8,7 @@ import threading
 import psycopg
 import pytest
 
-from recon import importer
+from recon import importer, jobs
 from recon.migrate import migrate
 from tests.conftest import APPEND_ONLY, fresh_database, raises_sqlstate
 
@@ -23,9 +23,9 @@ def staff(conn):
 def _failed_job(conn, build, attempts: int = 1) -> int:
     file_id = build.file("ledger")
     (job_id,) = conn.execute(
-        "INSERT INTO job (kind, import_file_id, status, attempts, error, finished_at) "
-        "VALUES ('parse_file', %s, 'failed', %s, 'synthetic: worker crashed', now()) RETURNING id",
-        (file_id, attempts)).fetchone()
+        "INSERT INTO job (kind, import_file_id, status, attempts, error, finished_at, requested_by) "
+        "VALUES ('parse_file', %s, 'failed', %s, 'synthetic: worker crashed', now(), %s) RETURNING id",
+        (file_id, attempts, build.staff())).fetchone()
     return job_id
 
 
@@ -35,7 +35,9 @@ def _requeue(conn, job_id, staff_id) -> str:
 
 def test_staff_roles_are_seeded(conn, staff):
     assert dict(conn.execute("SELECT display_name, role FROM staff_user").fetchall()) == {
-        "Demo Analyst 1": "analyst", "Demo Analyst 2": "analyst", "Demo Controller": "controller"}
+        "Demo Analyst 1": "analyst", "Demo Analyst 2": "analyst", "Demo Controller": "controller",
+        # created by migration 0012, not by seed-staff (D-091)
+        "Deployment seed": "system"}
 
 
 def test_requeueing_the_same_failed_job_twice_results_in_one_job(conn, build, staff):
@@ -73,8 +75,8 @@ def test_a_job_at_its_attempt_budget_cannot_be_requeued(conn, build, staff):
 def test_only_failed_jobs_can_be_requeued(conn, build, staff):
     file_id = build.file("ledger")
     (done,) = conn.execute(
-        "INSERT INTO job (kind, import_file_id, status, attempts) VALUES ('parse_file', %s, 'done', 1) "
-        "RETURNING id", (file_id,)).fetchone()
+        "INSERT INTO job (kind, import_file_id, status, attempts, requested_by) "
+        "VALUES ('parse_file', %s, 'done', 1, %s) RETURNING id", (file_id, staff["analyst"])).fetchone()
     assert _requeue(conn, done, staff["controller"]) == "not_failed"
     assert _requeue(conn, 987654321, staff["controller"]) == "not_found"
 
@@ -103,11 +105,9 @@ def test_the_worker_never_claims_a_job_at_its_budget(conn, staff):
 
 def test_a_second_active_replay_of_the_same_run_is_a_no_op(conn, build):
     month, run_id, _ = build.finished_standard_run()
-    insert = ("INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', %s) "
-              "ON CONFLICT (replay_of_run_id) WHERE kind = 'replay' AND status IN ('queued', 'running') "
-              "DO NOTHING RETURNING id")
-    assert conn.execute(insert, (run_id,)).fetchone() is not None
-    assert conn.execute(insert, (run_id,)).fetchone() is None
+    staff = build.staff()
+    assert jobs.enqueue_replay(conn, run_id, staff) is not None
+    assert jobs.enqueue_replay(conn, run_id, staff) is None
     assert conn.execute("SELECT count(*) FROM job WHERE kind = 'replay'").fetchone() == (1,)
 
 

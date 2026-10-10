@@ -36,13 +36,11 @@ export async function POST(request: Request) {
     return backTo(request, "/upload", { error: "reconcile_slots" });
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO job (kind, ledger_file_id, settlement_file_id, bank_file_id) VALUES ('reconcile', $1, $2, $3)
-     ON CONFLICT (ledger_file_id, settlement_file_id, bank_file_id)
-       WHERE kind = 'reconcile' AND status IN ('queued', 'running') DO NOTHING
-     RETURNING id`,
-    [ids.ledger, ids.settlement, ids.bank]);
+  // The same enqueue function the worker's seed command calls; records who asked (D-091).
+  const { rows: queued } = await pool.query<{ job_id: string | null }>(
+    "SELECT enqueue_reconcile($1, $2, $3, $4)::text AS job_id",
+    [ids.ledger, ids.settlement, ids.bank, staff.id]);
   return backTo(request, "/upload", {
-    notice: inserted.rowCount ? "reconcile_queued" : "reconcile_already_queued",
+    notice: queued[0].job_id ? "reconcile_queued" : "reconcile_already_queued",
   });
 }

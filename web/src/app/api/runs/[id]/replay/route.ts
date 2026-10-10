@@ -21,11 +21,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return backTo(request, `/runs/${runId}`, { error: "replay_not_finished" });
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO job (kind, replay_of_run_id) VALUES ('replay', $1)
-     ON CONFLICT (replay_of_run_id) WHERE kind = 'replay' AND status IN ('queued', 'running') DO NOTHING
-     RETURNING id`, [runId]);
+  // The same enqueue function the worker's seed command calls; records who asked (D-091).
+  const { rows: queued } = await pool.query<{ job_id: string | null }>(
+    "SELECT enqueue_replay($1, $2)::text AS job_id", [runId, staff.id]);
   return backTo(request, `/runs/${runId}`, {
-    notice: inserted.rowCount ? "replay_queued" : "replay_already_pending",
+    notice: queued[0].job_id ? "replay_queued" : "replay_already_pending",
   });
 }

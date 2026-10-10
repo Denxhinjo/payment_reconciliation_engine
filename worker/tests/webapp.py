@@ -34,6 +34,7 @@ import psycopg
 import pytest
 
 from recon import engine, importer, runs
+from recon import jobs as jobs_module   # _seed has a local list named `jobs`
 from recon.migrate import migrate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -103,6 +104,8 @@ class Seeded:
     failed_job: int              # failed, attempts 1: requeueable
     exhausted_job: int           # failed, attempts at the budget
     staff: dict[str, int]        # display name -> id
+    system_replay: int           # a replay run requested, through the job path, by the system actor
+    system_file: int             # a file uploaded by the system actor
 
 
 class WebApp:
@@ -209,9 +212,9 @@ def _seed(conn: psycopg.Connection) -> Seeded:
                  "error = 'EngineInputError: synthetic failure for the runs list' WHERE id = %s", (failed_run,))
 
     (refused_job,) = conn.execute(
-        "INSERT INTO job (kind, replay_of_run_id, status, attempts, error, finished_at) VALUES "
-        "('replay', %s, 'failed', 1, 'run was computed by engine 0.9.0; check out git tag engine-v0.9.0', now()) "
-        "RETURNING id", (run,)).fetchone()
+        "INSERT INTO job (kind, replay_of_run_id, status, attempts, error, finished_at, requested_by) VALUES "
+        "('replay', %s, 'failed', 1, 'run was computed by engine 0.9.0; check out git tag engine-v0.9.0', now(), %s) "
+        "RETURNING id", (run, staff["Demo Analyst 1"])).fetchone()
 
     (budget,) = conn.execute("SELECT recon_max_job_attempts()").fetchone()
     jobs = []
@@ -223,6 +226,15 @@ def _seed(conn: psycopg.Connection) -> Seeded:
                      (attempts, f"synthetic: worker crashed on attempt {attempts}", stored.job_id))
         jobs.append(stored.job_id)
 
+    # The system actor's work, through the job path (D-091): a replay of the identical replay
+    # (not of `run`, whose replays other tests count) and one uploaded file.
+    actor = staff["Deployment seed"]
+    system_job = jobs_module.enqueue_replay(conn, identical, actor)
+    system_replay = runs.process_replay_job(conn, system_job)[1].replay_run_id
+    system_file = importer.store_file(conn, "bank", "synthetic-system.xml",
+                                      b"<!-- SYNTHETIC DEMO DATA system upload -->", actor)
+    importer.process_parse_job(conn, system_file.job_id)
+
     by_reason = {}
     for exception_id, reason in conn.execute(
             "SELECT id, suggested_reason FROM run_exception WHERE run_id = %s ORDER BY ordinal", (run,)):
@@ -233,6 +245,7 @@ def _seed(conn: psycopg.Connection) -> Seeded:
         exceptions={"p1": by_reason["missing_from_bank"], "p2": by_reason["amount_mismatch"],
                     "p4": by_reason["possible_duplicate"], "p5": by_reason["unknown_deposit"]},
         failed_job=jobs[0], exhausted_job=jobs[1], staff=staff,
+        system_replay=system_replay, system_file=system_file.file_id,
     )
 
 

@@ -9,37 +9,42 @@ from tests.conftest import CHECK_VIOLATION, INSUFFICIENT_PRIVILEGE, UNIQUE_VIOLA
 
 # --- jobs ---------------------------------------------------------------------------------
 
-def test_parse_job_requires_its_file(conn):
+def test_parse_job_requires_its_file(conn, build):
+    staff = build.staff()
     with raises_sqlstate(conn, CHECK_VIOLATION):
-        conn.execute("INSERT INTO job (kind) VALUES ('parse_file')")
+        conn.execute("INSERT INTO job (kind, requested_by) VALUES ('parse_file', %s)", (staff,))
 
 
 def test_reconcile_job_requires_all_three_files(conn, build):
     ledger = build.file("ledger")
     with raises_sqlstate(conn, CHECK_VIOLATION):
-        conn.execute("INSERT INTO job (kind, ledger_file_id) VALUES ('reconcile', %s)", (ledger,))
+        conn.execute("INSERT INTO job (kind, ledger_file_id, requested_by) VALUES ('reconcile', %s, %s)",
+                     (ledger, build.staff()))
 
 
 def test_job_cannot_carry_arguments_of_another_kind(conn, build):
-    file_id = build.file("ledger")
+    file_id, staff = build.file("ledger"), build.staff()
     with raises_sqlstate(conn, CHECK_VIOLATION):
         conn.execute(
-            "INSERT INTO job (kind, import_file_id, ledger_file_id) VALUES ('parse_file', %s, %s)",
-            (file_id, file_id),
+            "INSERT INTO job (kind, import_file_id, ledger_file_id, requested_by) "
+            "VALUES ('parse_file', %s, %s, %s)",
+            (file_id, file_id, staff),
         )
 
 
 def test_at_most_one_parse_job_per_file(conn, build):
-    file_id = build.file("ledger")
-    conn.execute("INSERT INTO job (kind, import_file_id) VALUES ('parse_file', %s)", (file_id,))
+    file_id, staff = build.file("ledger"), build.staff()
+    insert = "INSERT INTO job (kind, import_file_id, requested_by) VALUES ('parse_file', %s, %s)"
+    conn.execute(insert, (file_id, staff))
     with raises_sqlstate(conn, UNIQUE_VIOLATION):
-        conn.execute("INSERT INTO job (kind, import_file_id) VALUES ('parse_file', %s)", (file_id,))
+        conn.execute(insert, (file_id, staff))
 
 
 def test_failed_job_requires_an_error(conn, build):
     file_id = build.file("ledger")
     (job_id,) = conn.execute(
-        "INSERT INTO job (kind, import_file_id) VALUES ('parse_file', %s) RETURNING id", (file_id,)
+        "INSERT INTO job (kind, import_file_id, requested_by) VALUES ('parse_file', %s, %s) RETURNING id",
+        (file_id, build.staff()),
     ).fetchone()
     with raises_sqlstate(conn, CHECK_VIOLATION):
         conn.execute("UPDATE job SET status = 'failed' WHERE id = %s", (job_id,))

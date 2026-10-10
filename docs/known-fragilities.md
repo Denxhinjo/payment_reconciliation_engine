@@ -34,6 +34,8 @@ stage reports.
 | F23 | Upload size is checked after the body has been read | web |
 | F24 | The scheduled worker uses part of the free compute budget | operations |
 | F25 | No "Run now": queued work waits for the hourly worker | operations |
+| F26 | Runs made with the CLI's `reconcile` / `replay` have no requester | provenance |
+| F27 | Only the web refuses the system actor; direct database clients can name it | auth |
 
 ---
 
@@ -80,7 +82,8 @@ and the accounts are printed openly.
 **Stops being acceptable when:** any non-synthetic data, or any real user, is involved. That
 requires real authentication (SSO) and a preparer ≠ approver rule.
 **On the public deployment:** visitors' writes would be permanent (append-only). Mitigated by the
-nightly reset of the `live` branch (D-085, D-086): writes last at most until 03:00 UTC. Still open:
+daily reset of the `live` branch (D-085, D-086): writes last until the next reset, usually
+around 03:00 UTC (D-093). Still open:
 anyone can act as any synthetic user, and abuse is visible until the reset.
 
 ### F7: Append-only is enforced by triggers a database owner could drop
@@ -221,6 +224,26 @@ every hour"), and after 70 minutes says it is overdue instead, so a stopped work
 "Run now" that triggers the worker workflow (`workflow_dispatch`), which needs a GitHub token with
 "actions: write" stored in Vercel: a credential decision for the owner.
 *Recorded 2026-10-07 (D-087), after the owner's request assumed such a button already existed.*
+
+### F26: Runs made with the CLI's `reconcile` / `replay` have no requester
+**What:** `recon reconcile` and `recon replay` call the engine directly, without a job, so the run
+has no job and therefore no requester. `run_overview.requested_by_name` is NULL, and the run
+history shows "—" (D-091).
+**Why acceptable now:** the deployed demo is seeded with `recon seed-demo`, which goes through
+jobs; the CLI commands are for local development and the README walkthrough.
+**Stops being acceptable when:** anyone produces runs that matter with those commands. Then make
+them enqueue and process a job (with `--staff`), as `seed-demo` does.
+*Recorded 2026-10-10.*
+
+### F27: Only the web refuses the system actor; direct database clients can name it
+**What:** "Deployment seed" cannot sign in to the web UI (D-091), but nothing in the database stops
+a client with database access from naming it. For example, `recon resolve --staff "Deployment
+seed"` records a resolution in its name.
+**Why acceptable now:** database access is the owner's and the worker's only; the public reaches
+the database only through the web UI.
+**Stops being acceptable when:** anyone else gets database access, or resolutions by the system
+actor must be impossible. Then add a database check refusing role `system` as a resolver.
+*Recorded 2026-10-10.*
 
 ---
 
