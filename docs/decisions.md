@@ -1260,3 +1260,66 @@ triggers would refuse it anyway. A rollback cannot leave half a seed.
 under load. The reset scheduled for 03:00 UTC on 9 October 2026 started at 09:57 UTC. "Every
 night at 03:00 UTC" promised a time nobody controls. The schedule itself (`0 3 * * *`) is
 unchanged. README, deploy.md and F6 now use the same wording.
+
+### D-094: The public demo now runs on `pristine-v2`, through a new `live` branch
+**Status:** accepted (carried out 2026-10-10 with the owner's approval)
+**What changed:**
+- `pristine-v2` was created from `pristine`, emptied, migrated and seeded with
+  `recon seed-demo` (D-092).
+- The old `live` was renamed `live-v1`, and a new `live` was created as a child of
+  `pristine-v2`.
+- The website (Vercel deployment `ifdc06iwr`, commit `415b6ef`) and the worker secret now point
+  at the new `live`.
+- The reset workflow is unchanged. It resets the branch named `live` to its parent, which is now
+  `pristine-v2`.
+
+**Why not "restore `live` from `pristine-v2`", as first proposed:** Neon's documentation says
+*"Instant restore is only supported for root branches… Child branches do not support instant
+restore"*. `live` and `pristine-v2` are both children of `pristine`. The proposal was corrected
+before anything ran.
+
+**Order, chosen so that old code never meets the new database, and new code never meets the
+old one:**
+1. Both workflows paused.
+2. Rename, then create the new `live`, then verify it.
+3. Vercel `DATABASE_URL` set. Per Vercel, *"Any change you make to environment variables are not
+   applied to previous deployments"*, so the running site was unaffected.
+4. The new code built as a production deployment without the domain (`--skip-domain`). Checked
+   through `vercel curl`: it showed the new banner and read the new database (staff ids 2–4).
+5. Promoted, so code and database switched together at 12:29 UTC.
+6. The worker secret set; workflows re-enabled.
+
+The logins are unchanged. A branch copies its parent's roles and passwords, so only the host
+name in the two connection strings changed.
+
+**Verified:**
+- The new `live` passed the same checks as `pristine-v2`:
+  - run #1 has the golden hash `4962e880…67c7`;
+  - run #2 is identical;
+  - 65 matches and 7 open exceptions;
+  - every job has a requester, "Deployment seed";
+  - no seeded record names a demo person;
+  - the privilege catalog is identical to a fresh migration.
+- A hand-run reset printed "live is the pristine demo". This proves the project-scoped key can
+  reset the new branch.
+- A hand-run worker processed 0 jobs.
+- On the public site, over HTTPS:
+  - the new banner;
+  - three demo accounts listed, and not the system actor;
+  - posting the system actor's id refused, with no cookie set;
+  - the seeded files and runs show "Deployment seed" with the "system actor" label;
+  - run #1 shows the golden hash;
+  - a reconciliation queued as Demo Analyst 1 appears as job #6, requested by Demo Analyst 1.
+
+**Rollback to the 8 October state (nothing from it was deleted or changed):**
+1. Pause both workflows.
+2. `vercel promote` deployment `q72txj1au`, which has the old code and the old database address
+   built in.
+3. Rename the new `live` away, and `live-v1` back to `live`.
+4. Point the GitHub worker secret and the Vercel `DATABASE_URL` back at that branch.
+5. Re-enable the workflows, and run the reset by hand.
+
+`pristine` is untouched and stays until the owner confirms it is no longer needed. It cannot be
+deleted while `live-v1` and `pristine-v2` are its children.
+**Branches now:** `pristine` (root), `pristine-v2` and `live-v1` (its children), and `live`
+(child of `pristine-v2`). That is 4 of the free plan's 10.

@@ -19,6 +19,11 @@ where a child branch starts as an exact copy of its **parent**):
   it afterwards.
 - **`live`**: a child of `pristine`. The website and the worker use only this one.
 
+**As deployed since 2026-10-10 (D-094):** the reference copy is **`pristine-v2`** (a child of the
+original `pristine`, seeded with `recon seed-demo`). `live` is a child of `pristine-v2`, and the
+old `live` is kept as `live-v1` for rollback. Below, "`pristine`" means "the parent of `live`".
+For a fresh deployment, follow the steps as written.
+
 Once a day, scheduled for 03:00 UTC, a job **resets** `live` from `pristine` (Neon's "reset from
 parent"), discarding whatever visitors did that day. Every page says so (decision D-085). GitHub
 does not guarantee start times, so it usually runs around then, sometimes hours later (D-093).
