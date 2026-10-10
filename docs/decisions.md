@@ -1212,8 +1212,10 @@ when its guard is removed.
 **Existing data:** the migration fills in parse jobs from their file's uploader, which is the truth.
 If a reconcile or replay job exists, nobody recorded who asked for it, so the migration **stops**
 (RC007) rather than invent a requester. A database with such jobs needs a decision, not a guess.
-The deployed `pristine` has no job rows at all (its runs were made with the CLI), so this
-refusal cannot fire there.
+The deployed `pristine` has only the three parse jobs that `recon import` queued; its runs were
+made with the CLI, without jobs. So there the migration would fill in all three from the
+uploader, and the refusal would not fire. (The new reference branch is built from empty anyway,
+D-092.)
 **Why a system actor rather than a demo person:** the seeded run was not done by "Demo Analyst 1".
 Attributing it to a demo person would be a small false record in a system whose purpose is
 records that survive questioning.
