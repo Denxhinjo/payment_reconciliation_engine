@@ -26,13 +26,14 @@ For a fresh deployment, follow the steps as written.
 
 Once a day, scheduled for 03:00 UTC, a job **resets** `live` from `pristine` (Neon's "reset from
 parent"), discarding whatever visitors did that day. Every page says so (decision D-085). GitHub
-does not guarantee start times, so it usually runs around then, sometimes hours later (D-093).
+does not guarantee start times: in October 2026 it started between 07:28 and 10:09 UTC (D-093,
+D-095).
 
 | Piece | Where | Connects as | To branch / connection |
 |---|---|---|---|
 | Migrations and demo seeding | your machine, by hand | `neondb_owner`, then `recon_worker_login` | `pristine`, direct |
 | Web UI (`web/`) | Vercel | `recon_web_login` (member of `recon_web`) | `live`, **pooled** |
-| Worker (`worker/`) | GitHub Actions, hourly | `recon_worker_login` (member of `recon_worker`) | `live`, direct |
+| Worker (`worker/`) | GitHub Actions, scheduled hourly (runs every few hours) | `recon_worker_login` (member of `recon_worker`) | `live`, direct |
 | Daily reset | GitHub Actions, scheduled 03:00 UTC | a project-scoped Neon API key | resets `live` from `pristine` |
 | CI | GitHub Actions | none (its own Postgres service) | none |
 
@@ -120,8 +121,8 @@ cd worker
 .venv/Scripts/python -m recon migrate --database-url "<neondb_owner DIRECT string for pristine>"
 ```
 
-**Check:** the output lists exactly twelve files, `0001_staff_and_files.sql` …
-`0012_job_requester.sql`.
+**Check:** the output lists exactly thirteen files, `0001_staff_and_files.sql` …
+`0013_overdue_threshold.sql`.
 Running it again must print `database is up to date`. If it prints `migration refused`, stop
 (D-035).
 
@@ -244,8 +245,9 @@ Then, under **Actions**, run each workflow once by hand:
    `live is the pristine demo`. The workflow itself fails if `live` is not exactly the prepared
    demo after the reset.
 
-From then on the worker runs hourly at minute 7 (F24), and the reset once a day, scheduled for
-03:00 UTC (D-093). Both
+From then on the worker is scheduled hourly at minute 7 (F24), and the reset once a day at
+03:00 UTC. GitHub delays and drops scheduled runs: in October 2026 the worker ran 3 to 7 times a
+day, and the reset started hours late (D-095). Both
 share one concurrency group, so a reset never interrupts a worker run.
 
 **Important:** GitHub pauses these two scheduled workflows after 60 days without repository
@@ -280,8 +282,8 @@ activity. See "If the demo stops resetting or processing jobs" below.
 Replace `<app>` with your Vercel URL.
 
 1. `https://<app>/` shows the sign-in page, with the yellow banner reading **DEMO — SYNTHETIC
-   DATA** and *"This demo resets once a day, usually around 03:00 UTC; anything you change is
-   discarded then."*, and the three synthetic accounts listed openly. "Deployment seed" is
+   DATA** and *"This demo resets once a day, scheduled for 03:00 UTC but often hours later;
+   anything you change is discarded then."*, and the three synthetic accounts listed openly. "Deployment seed" is
    **not** listed: it is the system actor and cannot sign in.
 2. Sign in as **Demo Analyst 1**. **Runs** shows run #1 (finished, 65 matches, 7 exceptions)
    and run #2 (the replay from step 4, outcome `identical`), both requested by
@@ -297,11 +299,11 @@ Replace `<app>` with your Vercel URL.
    **identical**, and both hashes equal `4962e880…67c7`. Nobody has to wait for anything. The
    nightly reset checks this every night and fails if it is missing.
 6. **Replay as a job:** on run #1 press **Replay this run**. The page says *"Replay queued: the
-   worker runs at 7 minutes past every hour."* and lists *"Replay pending (job #N). Queued: the
-   worker runs at 7 minutes past every hour."* There is no "Run now" button (F25): the replay
-   appears after the next hourly worker run, or at once if you run the **worker** workflow by
-   hand. If the page instead says *"Queued for over 70 minutes: the worker should have run by
-   now…"*, the worker is not running: see the section below.
+   worker picks it up on its next run, usually within a few hours."* and lists *"Replay pending
+   (job #N). Queued: the worker picks this up on its next run, usually within a few hours."* There
+   is no "Run now" button (F25): the replay appears after the next worker run, or at once if you
+   run the **worker** workflow by hand. If the page instead says *"Queued for over 12 hours: the
+   worker should have run by now…"*, the worker is not running: see the section below.
 7. **Reset:** resolve one exception, then run **reset-demo** by hand. Afterwards the exception is
    open again and your resolution is gone, and you are still signed in.
 
@@ -314,8 +316,8 @@ GitHub's documentation (*Disabling and enabling a workflow*) states: *"In a publ
 scheduled workflows are automatically disabled when no repository activity has occurred in 60
 days."* Both `worker` and `reset-demo` are scheduled workflows, so after two quiet months:
 
-- **Symptoms:** queued jobs never run, and the site says *"Queued for over 70 minutes: the worker
-  should have run by now…"* (D-088). Visitors' changes are no longer discarded at 03:00 UTC.
+- **Symptoms:** queued jobs never run, and the site says *"Queued for over 12 hours: the worker
+  should have run by now…"* (D-088, D-095). Visitors' changes are no longer discarded each day.
 - **To re-enable, in the browser:** the repository → **Actions** tab → choose **worker** in the
   left sidebar → **Enable workflow**. Then do the same for **reset-demo**.
 - **Or with the GitHub CLI:**
@@ -343,8 +345,9 @@ to look.
   `pristine`: `ALTER ROLE recon_web_login PASSWORD '<new>';`), then run **reset-demo** so `live`
   gets it. A change made on `live` alone is undone at the next reset. Then update the matching
   secret: Vercel `DATABASE_URL` for the web login (and redeploy), GitHub
-  `RECON_WORKER_DATABASE_URL` for the worker login. The passwords from the first deployment exist
-  only in those two places; nobody holds a copy.
+  `RECON_WORKER_DATABASE_URL` for the worker login. Nobody keeps a local copy of the passwords,
+  but Neon returns them to anyone signed in to the project (`neon connection-string <branch>
+  --role-name <role>`, checked 2026-10-10, D-094). Guard the Neon account accordingly.
 - **Rotating the Neon API key:** create a new project-scoped key, set it as the GitHub secret
   `NEON_API_KEY`, run **reset-demo** once to check it, then revoke the old key in Neon.
 - **Do not run the test suite against Neon.** Tests create and drop databases and need a

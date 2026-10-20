@@ -1,7 +1,7 @@
 """Plain queue status (D-088) and the nightly reset's pristine check (D-086).
 
-Database side: when a queued job counts as overdue (70 minutes, decided by job_overview), that a
-requeue restarts the clock, and that the UI's schedule sentence matches the worker's cron.
+Database side: when a queued job counts as overdue (12 hours, decided by job_overview, D-095), that
+a requeue restarts the clock, and that the UI promises no clock time the scheduler cannot keep.
 Workflow side: the verification script inside reset-demo.yml, run for real against a seeded
 pristine database, passes there and fails otherwise.
 """
@@ -51,34 +51,36 @@ def _queued_job(conn, staff, minutes_ago: int, status: str = "queued") -> int:
 
 # --- overdue is decided by the database -------------------------------------------------------------
 
-@pytest.mark.parametrize("minutes, overdue", [(0, False), (69, False), (71, True), (500, True)])
-def test_a_queued_job_is_overdue_after_seventy_minutes(conn, staff, minutes, overdue):
+@pytest.mark.parametrize("minutes, overdue", [(0, False), (71, False), (719, False), (721, True), (2000, True)])
+def test_a_queued_job_is_overdue_after_twelve_hours(conn, staff, minutes, overdue):
     assert _overdue(conn, _queued_job(conn, staff, minutes)) is overdue
 
 
 @pytest.mark.parametrize("status", ["running", "failed"])
 def test_only_queued_jobs_can_be_overdue(conn, staff, status):
-    assert _overdue(conn, _queued_job(conn, staff, 500, status)) is False
+    assert _overdue(conn, _queued_job(conn, staff, 2000, status)) is False
 
 
 def test_a_requeue_restarts_the_queue_clock(conn, staff):
-    job_id = _queued_job(conn, staff, 500, "failed")
+    job_id = _queued_job(conn, staff, 2000, "failed")
     conn.execute("SELECT requeue_failed_job(%s, %s)", (job_id, staff["Demo Controller"]))
     assert conn.execute("SELECT status FROM job WHERE id = %s", (job_id,)).fetchone() == ("queued",)
     assert _overdue(conn, job_id) is False
 
 
-def test_the_overdue_threshold_is_seventy_minutes_as_the_ui_says(conn):
+def test_the_overdue_threshold_is_twelve_hours_as_the_ui_says(conn):
     (threshold,) = conn.execute("SELECT extract(epoch FROM recon_queue_overdue_after())::int").fetchone()
-    assert threshold == 70 * 60
-    assert "Queued for over 70 minutes" in MESSAGES
+    assert threshold == 12 * 3600
+    assert "Queued for over 12 hours" in MESSAGES
 
 
-def test_the_ui_schedule_sentence_matches_the_worker_cron():
-    cron = re.search(r'cron: "([^"]+)"', (REPO / ".github" / "workflows" / "worker.yml").read_text()).group(1)
-    minute, hour, *_ = cron.split()
-    assert hour == "*" and minute.isdigit(), cron
-    assert f"the worker runs at {minute} minutes past every hour" in MESSAGES
+def test_the_ui_promises_no_clock_time_for_the_worker():
+    """GitHub delays and drops scheduled runs (D-095), so no message may name a time or frequency
+    the scheduler does not keep."""
+    for promise in ("minutes past", "every hour", "hourly", "at 03:00"):
+        assert promise not in MESSAGES, promise
+    layout = (REPO / "web" / "src" / "app" / "layout.tsx").read_text(encoding="utf-8")
+    assert "scheduled for 03:00 UTC but often hours later" in layout
 
 
 # --- the reset workflow's verification script, run for real -----------------------------------------

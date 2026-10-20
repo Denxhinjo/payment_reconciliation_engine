@@ -10,12 +10,12 @@ import type { PgError } from "@/lib/db";
  */
 
 const NOTICES = {
-  upload_stored: "Stored as file #{ref}. Queued for parsing: the worker runs at 7 minutes past every hour.",
+  upload_stored: "Stored as file #{ref}. Queued for parsing: the worker picks it up on its next run, usually within a few hours.",
   upload_duplicate: "These exact bytes were already imported as file #{ref}; nothing done.",
   reconcile_queued:
-    "Reconciliation queued: the worker runs at 7 minutes past every hour. The run appears under Runs once it has.",
+    "Reconciliation queued: the worker picks it up on its next run, usually within a few hours. The run appears under Runs once it has.",
   reconcile_already_queued: "A reconciliation of these three files is already queued; nothing changed.",
-  replay_queued: "Replay queued: the worker runs at 7 minutes past every hour.",
+  replay_queued: "Replay queued: the worker picks it up on its next run, usually within a few hours.",
   replay_already_pending: "A replay of this run is already pending; nothing changed.",
   resolution_recorded: "Resolution #{ref} recorded.",
   correction_recorded: "Correction recorded as resolution #{ref}.",
@@ -96,7 +96,7 @@ export const REQUEUE_CODES: Record<string, { notice?: NoticeCode; error?: ErrorC
  * minutes is recon_queue_overdue_after() in the database, which also decides `overdue`; this
  * component only shows the database's answer.
  */
-export const QUEUED_NOTE = "Queued: the worker runs at 7 minutes past every hour.";
+export const QUEUED_NOTE = "Queued: the worker picks this up on its next run, usually within a few hours.";
 export const OVERDUE_NOTE =
-  "Queued for over 70 minutes: the worker should have run by now. It may be paused or failing; check the worker workflow in GitHub Actions.";
+  "Queued for over 12 hours: the worker should have run by now. It may be paused or failing; check the worker workflow in GitHub Actions.";
 export const RUNNING_NOTE = "Running now.";

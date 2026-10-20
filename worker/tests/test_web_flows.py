@@ -13,7 +13,7 @@ import pytest
 
 WEB_SRC = Path(__file__).resolve().parents[2] / "web" / "src"
 BANNER = "DEMO — SYNTHETIC DATA"
-RESET_NOTICE = "This demo resets once a day, usually around 03:00 UTC; anything you change is discarded then."
+RESET_NOTICE = "This demo resets once a day, scheduled for 03:00 UTC but often hours later; anything you change is discarded then."
 
 
 @pytest.fixture(scope="module")
@@ -137,13 +137,13 @@ def test_replay_request_enqueues_a_job_and_returns_without_running_the_engine(we
     first = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     second = webapp.post(f"/api/runs/{run}/replay", cookie=analyst)
     assert first.status == second.status == 303
-    assert _flash(webapp, first) == "Replay queued: the worker runs at 7 minutes past every hour."
+    assert _flash(webapp, first) == "Replay queued: the worker picks it up on its next run, usually within a few hours."
     assert _flash(webapp, second) == "A replay of this run is already pending; nothing changed."
     assert webapp.count("SELECT count(*) FROM job WHERE kind = 'replay' AND replay_of_run_id = %s "
                         "AND status = 'queued'", run) == 1
     assert webapp.count("SELECT count(*) FROM reconciliation_run") == runs_before   # no engine ran
     page = webapp.get(f"/runs/{run}", cookie=analyst).text
-    assert "Replay pending (job #" in page and "Queued: the worker runs at 7 minutes past every hour." in page
+    assert "Replay pending (job #" in page and "Queued: the worker picks this up on its next run, usually within a few hours." in page
 
 
 def test_replay_of_a_failed_run_is_refused(webapp, analyst):
@@ -218,7 +218,7 @@ def test_resolve_then_correct_keeps_both_and_refusals_are_plain(webapp, analyst,
 def test_upload_stores_bytes_exactly_once_and_queues_one_parse(webapp, analyst):
     content = b"# SYNTHETIC DEMO DATA upload test\r\nentry_id,booked_on\r\n"
     first = webapp.upload(analyst, "ledger", "synthetic-upload.csv", content)
-    assert "Queued for parsing: the worker runs at 7 minutes past every hour." in _flash(webapp, first)
+    assert "Queued for parsing: the worker picks it up on its next run, usually within a few hours." in _flash(webapp, first)
     second = webapp.upload(analyst, "ledger", "renamed.csv", content)
     assert "already imported as file #" in _flash(webapp, second)
     with webapp.db() as conn:
@@ -251,8 +251,8 @@ def test_reconcile_request_refuses_a_file_in_the_wrong_slot(webapp, analyst):
 
 # --- plain queue status (D-088) -------------------------------------------------------------------
 
-QUEUED_NOTE = "Queued: the worker runs at 7 minutes past every hour."
-OVERDUE_NOTE = "Queued for over 70 minutes: the worker should have run by now."
+QUEUED_NOTE = "Queued: the worker picks this up on its next run, usually within a few hours."
+OVERDUE_NOTE = "Queued for over 12 hours: the worker should have run by now."
 
 
 def test_a_queued_replay_says_when_it_will_run_and_when_it_is_overdue(webapp, analyst):
@@ -263,7 +263,7 @@ def test_a_queued_replay_says_when_it_will_run_and_when_it_is_overdue(webapp, an
     page = webapp.get(f"/runs/{run}", cookie=analyst).text
     assert f"Replay pending (job #{job_id})." in page and QUEUED_NOTE in page and OVERDUE_NOTE not in page
     with webapp.db() as conn:
-        conn.execute("UPDATE job SET queued_at = now() - interval '71 minutes' WHERE id = %s", (job_id,))
+        conn.execute("UPDATE job SET queued_at = now() - interval '12 hours 1 minute' WHERE id = %s", (job_id,))
     page = webapp.get(f"/runs/{run}", cookie=analyst).text
     assert OVERDUE_NOTE in page and QUEUED_NOTE not in page
 

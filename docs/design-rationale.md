@@ -235,9 +235,10 @@ requeueing is refused. It stays visible on the Jobs page with its error and "3 /
 it needs a person to investigate (3.4). There is deliberately no button that grants a fresh budget
 (known weakness F20).
 
-**A worker that stops running.** Every queued job shows when the worker is expected next. After 70
-minutes it says instead: *"Queued for over 70 minutes: the worker should have run by now. It may be
-paused or failing…"*. A stopped worker is visible, not silent. *(decision: D-088.)*
+**A worker that stops running.** Every queued job says it will be picked up on the worker's next
+run. After 12 hours, longer than any gap seen so far, it says instead: *"Queued for over 12 hours:
+the worker should have run by now. It may be paused or failing…"*. A stopped worker is visible,
+not silent. *(decision: D-088, D-095.)*
 
 **Repeated clicks.** Asking twice for the same reconciliation or replay while one is waiting creates
 one job, not two. *(test: `test_reconcile_request_is_queued_once`; decision: D-075.)*
@@ -299,11 +300,12 @@ unacceptable (`docs/known-fragilities.md`). The ones a finance or compliance rea
   .001.02 is read (D-002).
 - **The daily reset time is not guaranteed.** The public demo discards visitors' changes once a
   day. It is scheduled for 03:00 UTC, but the scheduler (GitHub Actions) does not guarantee start
-  times. The reset on 9 October started at 09:57 UTC, and the one on 10 October at 09:20 UTC
-  (decision: D-093; GitHub Actions run history). The banner therefore says "usually around 03:00
-  UTC".
-- **The worker runs hourly, and that time is not guaranteed either.** Queued work waits for it, and
-  there is no "run now" button (F25, D-087).
+  times. From 10 to 20 October every scheduled reset started between 07:28 and 10:09 UTC
+  (decision: D-093, D-095). The banner therefore says "scheduled for 03:00 UTC but often hours
+  later".
+- **The worker's timing is not guaranteed either.** It is scheduled hourly, but ran only 3 to 7
+  times a day in October; queued work waits for it, and there is no "run now" button (F25,
+  D-095).
 - **It makes no regulatory claim.** It records and enforces what is described above. Whether that
   satisfies a given regulator's requirements is for the firm to judge.
 
@@ -312,11 +314,11 @@ unacceptable (`docs/known-fragilities.md`). The ones a finance or compliance rea
 ## Appendix: technical notes for engineers
 
 **Stack.**
-- PostgreSQL 18, with raw SQL migrations 0001–0012 and no ORM.
+- PostgreSQL 18, with raw SQL migrations 0001–0013 and no ORM.
 - Python 3.12 worker: psycopg 3, lxml.
 - Next.js 15 web UI, which only reads views and computes no figures (D-076).
-- Hosting: Neon (database), Vercel (`fra1`) and GitHub Actions (worker hourly at minute 7, reset
-  scheduled 03:00 UTC, CI).
+- Hosting: Neon (database), Vercel (`fra1`) and GitHub Actions (worker scheduled hourly, reset
+  scheduled 03:00 UTC, CI; GitHub delays and drops scheduled runs, D-095).
 - CI: 645 tests passed on commit `6dfd0a6`, against real PostgreSQL. Database tests fail rather
   than skip without a database (D-027, D-036).
 

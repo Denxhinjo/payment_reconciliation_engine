@@ -1323,3 +1323,39 @@ name in the two connection strings changed.
 deleted while `live-v1` and `pristine-v2` are its children.
 **Branches now:** `pristine` (root), `pristine-v2` and `live-v1` (its children), and `live`
 (child of `pristine-v2`). That is 4 of the free plan's 10.
+
+## Schedule honesty, 2026-10-20
+
+### D-095: The site promises no clock times; a queued job is overdue after 12 hours
+**Status:** accepted (owner asked for everything needing a fix to be fixed)
+**What was observed** (GitHub Actions run history, 8–20 October 2026):
+- **The worker** is scheduled hourly at minute 7, but ran only 3 to 7 times a day (60 runs in
+  12 days). The median gap between runs was 5 hours, and the longest 9.9 hours.
+- **The reset** is scheduled for 03:00 UTC, but every scheduled reset from 10 to 20 October
+  started between 07:28 and 10:09 UTC.
+
+**So two statements on the site were false most of the time:**
+- "the worker runs at 7 minutes past every hour";
+- the banner's "usually around 03:00 UTC" (D-093).
+
+Worse, the 70-minute overdue warning (D-088) told visitors, most days, that a healthy worker
+"may be paused or failing".
+**Decision:**
+- Every queued-job message now says the worker "picks it up on its next run, usually within a
+  few hours", with no clock time.
+- The banner says the reset is "scheduled for 03:00 UTC but often hours later".
+- Migration 0013 raises `recon_queue_overdue_after()` from 70 minutes to 12 hours. That is above
+  every gap observed, so the warning still exposes a worker that has really stopped.
+- A test now fails if any message promises "minutes past", "every hour", "hourly" or "at 03:00".
+  It replaces the test that tied the message to the cron minute.
+
+The schedules themselves are unchanged.
+**Rejected:** triggering the workflows from an outside scheduler. That would mean a new service
+with a credential able to start workflows, and its free tier and reliability are unchecked.
+Recorded as part of F25.
+**Also recorded here (omitted from D-094):** `pristine-v2` was seeded as `neondb_owner`, not with
+the worker login that docs/deploy.md step 4 prescribes, because the worker password is not held
+locally. The data is the same either way. Every check in D-094 ran on the result, including the
+privilege catalog.
+**What it does not guarantee:** that the worker runs within any set time. "Usually within a few
+hours" describes the observed behaviour, which GitHub may change.

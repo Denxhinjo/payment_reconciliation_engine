@@ -5,7 +5,7 @@
 > accounts, IBANs or transactions are used anywhere.
 
 **Live demo:** https://payment-reconciliation-demo.vercel.app (synthetic data; resets once a day,
-usually around 03:00 UTC).
+scheduled for 03:00 UTC but often hours later).
 
 A reconciliation engine that matches a fintech's internal ledger, its payment processor's
 settlement report, and its bank statement. It puts only the genuine differences in front of

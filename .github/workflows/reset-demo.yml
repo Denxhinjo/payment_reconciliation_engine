@@ -9,7 +9,7 @@ name: reset-demo
 
 on:
   schedule:
-    - cron: "0 3 * * *"        # 03:00 UTC daily, the time stated on every page
+    - cron: "0 3 * * *"        # requested time; GitHub often starts it hours later (D-093, D-095)
   workflow_dispatch:
 
 # Shared with the worker: a reset never interrupts a worker run, and the other way round.

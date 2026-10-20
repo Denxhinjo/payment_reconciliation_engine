@@ -33,7 +33,7 @@ stage reports.
 | F22 | Sign-out is not origin-checked | web |
 | F23 | Upload size is checked after the body has been read | web |
 | F24 | The scheduled worker uses part of the free compute budget | operations |
-| F25 | No "Run now": queued work waits for the hourly worker | operations |
+| F25 | No "Run now": queued work waits for the next worker run, often hours | operations |
 | F26 | Runs made with the CLI's `reconcile` / `replay` have no requester | provenance |
 | F27 | Only the web refuses the system actor; direct database clients can name it | auth |
 
@@ -82,8 +82,8 @@ and the accounts are printed openly.
 **Stops being acceptable when:** any non-synthetic data, or any real user, is involved. That
 requires real authentication (SSO) and a preparer ≠ approver rule.
 **On the public deployment:** visitors' writes would be permanent (append-only). Mitigated by the
-daily reset of the `live` branch (D-085, D-086): writes last until the next reset, usually
-around 03:00 UTC (D-093). Still open:
+daily reset of the `live` branch (D-085, D-086): writes last until the next reset, scheduled for
+03:00 UTC but in practice hours later (D-093, D-095). Still open:
 anyone can act as any synthetic user, and abuse is visible until the reset.
 
 ### F7: Append-only is enforced by triggers a database owner could drop
@@ -208,18 +208,21 @@ request size at the platform or proxy, or check `Content-Length` first.
 100 CU-hours **per project** per month (Plans page, read 2026-10-07; compute has no account-wide
 total, so the owner's other demo does not share this budget). Each hourly worker run wakes the
 database for about 5 minutes, about 15 CU-hours a month; the nightly reset check adds about 0.6.
+In October 2026 GitHub ran the worker only 3 to 7 times a day (D-095), so actual use is lower.
 **Why acceptable now:** about 16 of 100 CU-hours before visitors (it was about 61 at every 15
 minutes, before D-087).
 **Stops being acceptable when:** visitor traffic plus the schedule approach 100 CU-hours (Neon then
 suspends compute until the next month). Run the worker only when there is queued work.
 
-### F25: No "Run now": queued work waits for the hourly worker
+### F25: No "Run now": queued work waits for the next worker run, often hours
 **What:** "Replay this run" and "Queue reconciliation" only enqueue a job. The worker processes it
-at its next hourly run (minute 7), or when someone runs the workflow by hand in GitHub Actions. A
-visitor may wait up to an hour to see a replay or an upload's parse result.
-**Why acceptable now:** every queued job says when it will run ("the worker runs at 7 minutes past
-every hour"), and after 70 minutes says it is overdue instead, so a stopped worker is visible
-(D-088). The work is durable in the queue; nothing is lost by waiting.
+at its next run, or when someone runs the workflow by hand in GitHub Actions. The worker is
+scheduled hourly, but GitHub ran it only 3 to 7 times a day in October 2026: median gap 5 hours,
+longest 9.9 (D-095). A visitor may wait hours to see a replay or an upload's parse result.
+**Why acceptable now:** every queued job says it will be picked up "on its next run, usually within
+a few hours", and after 12 hours says it is overdue instead, so a stopped worker is visible
+(D-088, D-095). The work is durable in the queue; nothing is lost by waiting. An outside scheduler
+could make runs regular, but needs a credential that can start workflows (D-095).
 **Stops being acceptable when:** the demo is shown live to someone waiting for a result. Then add a
 "Run now" that triggers the worker workflow (`workflow_dispatch`), which needs a GitHub token with
 "actions: write" stored in Vercel: a credential decision for the owner.
