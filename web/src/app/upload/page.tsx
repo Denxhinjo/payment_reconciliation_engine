@@ -7,6 +7,42 @@ import { importFileCounts, importFiles, pendingReconciles } from "@/lib/queries"
 
 export const dynamic = "force-dynamic";
 
+const REPO = "https://github.com/Denxhinjo/payment_reconciliation_engine";
+const RAW = "https://raw.githubusercontent.com/Denxhinjo/payment_reconciliation_engine/main/demo-data/2026-09";
+const ext = { target: "_blank", rel: "noopener noreferrer" } as const;
+
+/** Where to get synthetic files to try the demo with. Only the first two kinds parse as they are:
+ * the parsers read exactly three formats (D-002, D-050, D-055), so outside datasets need converting. */
+function TestData() {
+  return (
+    <details className="test-data">
+      <summary>Need test files?</summary>
+      <ul>
+        <li>
+          <strong>The demo month, ready to upload:</strong>{" "}
+          <a href={`${RAW}/synthetic_ledger_2026-09.csv`} {...ext}>ledger CSV</a>,{" "}
+          <a href={`${RAW}/synthetic_orrery_settlement_2026-09.csv`} {...ext}>Orrery settlement CSV</a>,{" "}
+          <a href={`${RAW}/synthetic_bank_camt053_2026-09.xml`} {...ext}>Demo Bank camt.053</a>.
+          These exact bytes are already imported here, so uploading them is recognised as a duplicate.
+        </li>
+        <li>
+          <strong>Another month:</strong> <code>recon generate</code> writes three matching files with
+          planted problems (<a href={`${REPO}#the-synthetic-demo-month-and-its-planted-problems`} {...ext}>how</a>).
+        </li>
+        <li>
+          <strong>Larger or real-world-shaped synthetic data</strong>, which must first be converted to
+          these three formats:{" "}
+          <a href="https://www.kaggle.com/datasets/ealaxi/paysim1" {...ext}>PaySim</a> and{" "}
+          <a href="https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml" {...ext}>IBM AML
+          transactions</a> on Kaggle, or a payment processor&apos;s test mode, such as{" "}
+          <a href="https://docs.stripe.com/testing" {...ext}>Stripe&apos;s</a>. Check each source&apos;s licence.
+        </li>
+      </ul>
+      <p className="warn-line">Upload synthetic data only: this demo is public, and anyone can see what you upload until the next reset.</p>
+    </details>
+  );
+}
+
 /** Upload a file, request a reconciliation, and see every imported file. Parsing and matching
  * happen in the worker; this page only stores and enqueues (D-078). */
 export default async function UploadPage({ searchParams }: { searchParams: SearchParams }) {
@@ -36,6 +72,7 @@ export default async function UploadPage({ searchParams }: { searchParams: Searc
               <LockIcon /> Identical bytes are recognised by SHA-256 and stored once. A file the parser
               rejects is kept as evidence but can never be used in a run.
             </p>
+            <TestData />
           </section>
 
           <section className="card card-pad">

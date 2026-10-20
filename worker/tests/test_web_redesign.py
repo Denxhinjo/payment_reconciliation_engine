@@ -100,3 +100,15 @@ def test_the_sign_in_page_shows_counts_but_no_evidence(webapp):
 def test_the_exceptions_page_needs_a_session(webapp):
     response = webapp.get("/exceptions")
     assert response.status in (303, 307) and "/login" in response.location
+
+
+def test_the_upload_page_says_where_to_get_synthetic_test_files(webapp, analyst):
+    """The ready-to-upload links name the committed demo files, and the page warns that the demo is public."""
+    from pathlib import Path
+    body = webapp.get("/upload", cookie=analyst).text
+    demo = Path(__file__).resolve().parents[2] / "demo-data" / "2026-09"
+    linked = re.findall(r'href="https://raw\.githubusercontent\.com/Denxhinjo/payment_reconciliation_engine/main/demo-data/2026-09/([^"]+)"', body)
+    assert sorted(linked) == sorted(p.name for p in demo.iterdir() if p.suffix in (".csv", ".xml"))
+    text = _text(body)
+    assert "Need test files?" in text and "must first be converted to these three formats" in text
+    assert "Upload synthetic data only" in text
