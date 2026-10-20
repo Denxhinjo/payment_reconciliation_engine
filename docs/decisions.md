@@ -1359,3 +1359,102 @@ locally. The data is the same either way. Every check in D-094 ran on the result
 privilege catalog.
 **What it does not guarantee:** that the worker runs within any set time. "Usually within a few
 hours" describes the observed behaviour, which GitHub may change.
+
+## The redesign, 2026-10-20
+
+### D-096: The UI follows "Payment Reconciliation UI.pdf"; its new figures come from views
+**Status:** accepted (owner asked for the software to follow the PDF, 2026-10-20)
+**What:** all seven screens follow the PDF: sign-in, runs dashboard, run detail, exceptions
+queue, exception detail, upload, and jobs. There is a new `/exceptions` page, the queue of the
+newest finished original run, and the navigation shows that run's open-exception count.
+**The UI still computes nothing (D-076).** Migration 0014 adds read-only views for every new
+figure:
+- `run_figures`: statement period label, rows per source, rows compared, open breaks needing
+  review, open timing items, resolved, value under review, latest replay;
+- `exception_figures`: per exception, the rows and totals from each source, expected, received
+  and shortfall for a mismatch, the amount at issue (D-097), a reference, and how many others
+  are open;
+- `latest_run`, `run_exception_reasons`, `import_file_overview` with parsed row counts,
+  `import_file_counts`, `job_results`, `job_counts`;
+- `run_planted_items`: the planted problems, see below.
+
+Proportion bars take their widths from stored counts via CSS `flex-grow`, not from arithmetic.
+**Planted problems are checked, not asserted.** The demo month's planted items are stored as
+reference data (`demo_planted_item`, `demo_planted_files`), keyed to the three files' SHA-256
+and copied from `planted.json`; a test keeps the two identical. An item counts as "caught" only
+if the run holds an exception with the expected reason, or a match with the expected pass, whose
+rows are exactly the listed rows. A test proves the check fails when they differ. The panels
+appear only for a run of exactly those files.
+**Where the build departs from the PDF, and why:**
+1. **Banner.** The PDF says "Resets daily around 03:00 UTC". That was observed false (D-095),
+   so it reads "Resets once a day, scheduled for 03:00 UTC but often hours later".
+2. **Exception numbers.** The PDF numbers the breaks #1 missing payout, #2 fee mismatch, #3
+   duplicate, #4 deposit, #5–#7 timing. The engine's canonical result orders them #1 mismatch,
+   #2 missing payout, #3–#4 timing, #5 duplicate, #6 timing, #7 deposit. Those numbers are part of
+   the stored result, so they are shown as they are. The queue keeps the PDF's grouping: breaks
+   needing review first, timing items last.
+3. **"Exact" pass.** The PDF says "one ledger row, one settlement line and one bank entry agree
+   to the cent". The exact pass in fact pairs a ledger bank transfer with a bank entry, with no
+   settlement line (design §5.4). The text says what the engine does.
+4. **The fee check.** The PDF's mismatch page says "The stated fee is correct: 1.4% of 316.85 =
+   4.44, plus the EUR 0.25 fixed fee". The engine takes the fee as Orrery states it and checks it
+   against no schedule (F8). Showing that sum would be a check the system never made. The page
+   instead says the fee is taken as stated and not checked.
+5. **System actor label.** The PDF labels "Deployment seed" as "System" in the run tables but
+   not in the jobs or file lists. D-091 requires the label wherever a name appears, so it is shown
+   in all three.
+6. **Planted-problem lines** use the generator's own descriptions from `planted.json`, not the
+   PDF's shorter paraphrases, so the dashboard says exactly what was planted.
+7. **Value under review** is labelled with the count of open breaks needing review, instead of
+   the PDF's "(P1, P2, P4, P5)". Planted ids exist only for the demo month; the figure applies to
+   any run.
+8. **Kept, though not in the PDF:**
+   - the requeue log, which is audit evidence (D-074);
+   - every replay of a run, with the four distinct outcomes (D-078);
+   - a "Full record" section with the engine commit and the input file hashes;
+   - attempts shown as "1 / 3", so the budget is visible (D-074).
+
+**What it does not guarantee:** the planted panels describe only the September 2026 demo files.
+A visual match with the PDF was checked by eye from screenshots, not by an automated comparison.
+
+### D-097: "Amount at issue": the money a break puts in question
+**Status:** accepted
+**Definition** (`exception_figures.amount_at_issue_minor`, in minor units):
+- `missing_from_bank`: what should have reached the bank (settlement net, or the ledger amount
+  for a direct transfer);
+- `amount_mismatch`: |expected at bank − received|;
+- `possible_duplicate`: the duplicate ledger amount;
+- `unknown_deposit`: the bank credit;
+- `unexplained_debit`: the bank debit, as a positive amount;
+- `missing_from_ledger`: settlement gross with no ledger counterpart;
+- `timing`: none, because the money is expected to arrive.
+
+"Value under review" is the sum over open breaks needing review: EUR 2,373.84 for the demo month.
+**Why:** the PDF shows an amount per break and a total. Without a stated rule, the same figure
+could mean gross, net or the difference, depending on who reads it.
+**What it does not guarantee:** it is a reading aid, not an accounting position. A mismatch counts
+only its difference, not the whole payout.
+
+### D-098: Reconcile design tokens replace the KYC tokens (supersedes D-080)
+**Status:** accepted
+**What:** `web/src/styles/tokens.css` now holds the PDF's light palette, spacing, radii and type
+scale; the KYC tokens copied in D-080 are gone. The fonts are IBM Plex Sans and IBM Plex Mono.
+They are self-hosted by Next.js at build time, so a visitor's browser requests nothing from a
+third party.
+**Rejected:** keeping the KYC tokens and approximating the PDF, which would have satisfied neither.
+
+### D-099: The sign-in page shows the demo month's public counts
+**Status:** accepted (the PDF's sign-in page shows them)
+**What:** before sign-in, the page shows, for the newest finished original run:
+- row counts per source;
+- the number of payouts;
+- matches and exceptions;
+- the period;
+- the replay outcome.
+
+It shows no row, amount, explanation or hash. A test checks that the page carries none of the
+evidence strings that the anonymous-refusal tests look for.
+**Why acceptable:** the data is synthetic, and every account is public (D-031). The protected
+pages still redirect anonymous visitors before any query runs (D-077).
+**Stops being acceptable when:** the demo holds anything but synthetic data. Then the sign-in
+page must show nothing from the database.

@@ -36,6 +36,7 @@ stage reports.
 | F25 | No "Run now": queued work waits for the next worker run, often hours | operations |
 | F26 | Runs made with the CLI's `reconcile` / `replay` have no requester | provenance |
 | F27 | Only the web refuses the system actor; direct database clients can name it | auth |
+| F28 | The evidence query prints settlement fee and net in minor units | display |
 
 ---
 
@@ -247,6 +248,18 @@ the database only through the web UI.
 **Stops being acceptable when:** anyone else gets database access, or resolutions by the system
 actor must be impossible. Then add a database check refusing role `system` as a resolver.
 *Recorded 2026-10-10.*
+
+### F28: The evidence query prints settlement fee and net in minor units
+**What:** the evidence query shared by the worker (`recon show`) and the web builds a settlement
+line's detail as `'fee ' || fee_minor || ', net ' || net_minor`. So `recon show` prints, for
+example, "fee 469, net 31216" for EUR 4.69 and EUR 312.16. The old web evidence table showed
+the same text. The redesigned exception page no longer shows that detail, and its gross, fee
+and net totals come from `exception_figures` (D-096).
+**Why acceptable now:** the amounts are correct, only unformatted, and the main amount column is
+formatted. It is a display defect, not a data defect.
+**Stops being acceptable when:** anyone reads `recon show` output as evidence. Then format the
+detail in EUR (or drop it), in both copies of the query.
+*Recorded 2026-10-20, found while building the redesign.*
 
 ---
 

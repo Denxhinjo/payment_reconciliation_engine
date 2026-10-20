@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-PAGE_TEMPLATES = ["/runs", "/runs/{run}", "/runs/{run}/queue", "/exceptions/{p2}", "/upload", "/jobs"]
+PAGE_TEMPLATES = ["/runs", "/runs/{run}", "/runs/{run}/queue", "/exceptions", "/exceptions/{p2}", "/upload", "/jobs"]
 MUTATION_TEMPLATES = [
     "/api/upload", "/api/runs", "/api/runs/{run}/replay", "/api/exceptions/{p2}/resolve",
     "/api/exceptions/{p2}/correct", "/api/jobs/{failed_job}/requeue",

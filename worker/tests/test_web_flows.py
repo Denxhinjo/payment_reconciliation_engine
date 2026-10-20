@@ -12,8 +12,8 @@ from urllib.parse import unquote_plus
 import pytest
 
 WEB_SRC = Path(__file__).resolve().parents[2] / "web" / "src"
-BANNER = "DEMO — SYNTHETIC DATA"
-RESET_NOTICE = "This demo resets once a day, scheduled for 03:00 UTC but often hours later; anything you change is discarded then."
+BANNER = "Synthetic data. Orrery Payments and Demo Bank are fictional"
+RESET_NOTICE = "Resets once a day, scheduled for 03:00 UTC but often hours later; anything you change is discarded then."
 
 
 @pytest.fixture(scope="module")
@@ -50,11 +50,11 @@ def test_sign_in_page_prints_the_synthetic_accounts_openly(webapp):
     assert page.status == 200 and BANNER in page.body and RESET_NOTICE in page.text
     for name in ("Demo Analyst 1", "Demo Analyst 2", "Demo Controller"):
         assert name in page.body
-    assert "There is no password" in page.body
+    assert "there is no password" in page.body
     assert 'type="password"' not in page.body
 
 
-@pytest.mark.parametrize("template", ["/runs", "/runs/{run}", "/runs/{run}/queue", "/exceptions/{p2}",
+@pytest.mark.parametrize("template", ["/runs", "/runs/{run}", "/runs/{run}/queue", "/exceptions", "/exceptions/{p2}",
                                       "/upload", "/jobs", "/no-such-page"])
 def test_every_page_carries_the_demo_banner(webapp, analyst, template):
     s = webapp.seeded
@@ -278,7 +278,7 @@ def test_a_queued_reconciliation_and_a_queued_parse_show_the_schedule_on_the_upl
             (ledger, settlement, ledger, webapp.seeded.staff["Demo Analyst 1"])).fetchone()
     webapp.upload(analyst, "bank", "synthetic-queued.xml", b"<!-- SYNTHETIC DEMO DATA queued parse -->")
     page = webapp.get("/upload", cookie=analyst).text
-    assert "Requested reconciliations" in page and f"#{job_id}" in page
+    assert "Waiting for the worker" in page and f"Job #{job_id}" in page
     assert page.count(QUEUED_NOTE) >= 2            # the reconciliation and the file awaiting parsing
 
 

@@ -11,7 +11,7 @@ import pytest
 from recon import runs
 
 SYSTEM_ACTOR = "Deployment seed"
-SYSTEM_LABEL = re.compile(re.escape(SYSTEM_ACTOR) + r'\s*(?:<!-- -->)?\s*<span class="chip neutral">system actor</span>')
+SYSTEM_LABEL = re.compile(re.escape(SYSTEM_ACTOR) + r'\s*(?:<!-- -->)?\s*<span class="chip system"[^>]*>System</span>')
 
 
 @pytest.fixture(scope="module")
@@ -26,8 +26,12 @@ def _system_id(webapp) -> str:
 # --- the system actor cannot sign in -------------------------------------------------------------
 
 def test_the_system_actor_is_not_offered_on_the_sign_in_page(webapp):
+    """The page may name the system actor (it explains that it cannot sign in), but never offers it."""
     page = webapp.get("/login")
-    assert page.status == 200 and "Demo Analyst 1" in page.body and SYSTEM_ACTOR not in page.body
+    offered = re.findall(r'name="staff_id" value="(\d+)"', page.body)
+    assert page.status == 200 and "Demo Analyst 1" in page.body
+    assert _system_id(webapp) not in offered and len(offered) == 3
+    assert f"Sign in as {SYSTEM_ACTOR}" not in page.body.replace("<!-- -->", "")
 
 
 def test_posting_the_system_actor_s_id_to_the_sign_in_endpoint_is_refused(webapp):

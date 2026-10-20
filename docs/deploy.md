@@ -121,8 +121,8 @@ cd worker
 .venv/Scripts/python -m recon migrate --database-url "<neondb_owner DIRECT string for pristine>"
 ```
 
-**Check:** the output lists exactly thirteen files, `0001_staff_and_files.sql` …
-`0013_overdue_threshold.sql`.
+**Check:** the output lists exactly fourteen files, `0001_staff_and_files.sql` …
+`0014_ui_figures.sql`.
 Running it again must print `database is up to date`. If it prints `migration refused`, stop
 (D-035).
 
@@ -281,13 +281,16 @@ activity. See "If the demo stops resetting or processing jobs" below.
 
 Replace `<app>` with your Vercel URL.
 
-1. `https://<app>/` shows the sign-in page, with the yellow banner reading **DEMO — SYNTHETIC
-   DATA** and *"This demo resets once a day, scheduled for 03:00 UTC but often hours later;
-   anything you change is discarded then."*, and the three synthetic accounts listed openly. "Deployment seed" is
-   **not** listed: it is the system actor and cannot sign in.
-2. Sign in as **Demo Analyst 1**. **Runs** shows run #1 (finished, 65 matches, 7 exceptions)
-   and run #2 (the replay from step 4, outcome `identical`), both requested by
-   "Deployment seed" with the label **system actor**.
+1. `https://<app>/` shows the sign-in page. The dark banner reads **DEMO** · *"Synthetic data.
+   Orrery Payments and Demo Bank are fictional … Resets once a day, scheduled for 03:00 UTC but
+   often hours later; anything you change is discarded then."* Beside it: the demo month's counts
+   (653 rows, 612 lines · 30 payouts, 67 entries, 65 matches · 7 exceptions) and the three
+   synthetic accounts. "Deployment seed" is **not** offered: it is the system actor and cannot
+   sign in.
+2. Sign in as **Demo Analyst 1**. **Runs** shows September 2026: 65 matches, 7 of 7 exceptions
+   open (4 need review, 3 timing), replay check *Identical*, 1,332 rows compared, and "5 of 5
+   caught". The table lists run #1 and run #2 (the replay from step 4), both requested by
+   "Deployment seed" with the label **System**. **Exceptions** shows EUR 2,373.84 under review.
 3. **Run #1 → Open the exceptions queue**: seven open exceptions.
 4. With no session, from a terminal:
 
@@ -298,7 +301,7 @@ Replace `<app>` with your Vercel URL.
 5. **The replay proof is there at once:** run #1's page lists run #2 as a replay with outcome
    **identical**, and both hashes equal `4962e880…67c7`. Nobody has to wait for anything. The
    nightly reset checks this every night and fails if it is missing.
-6. **Replay as a job:** on run #1 press **Replay this run**. The page says *"Replay queued: the
+6. **Replay as a job:** on run #1 press **Request replay**. The page says *"Replay queued: the
    worker picks it up on its next run, usually within a few hours."* and lists *"Replay pending
    (job #N). Queued: the worker picks this up on its next run, usually within a few hours."* There
    is no "Run now" button (F25): the replay appears after the next worker run, or at once if you

@@ -314,7 +314,7 @@ unacceptable (`docs/known-fragilities.md`). The ones a finance or compliance rea
 ## Appendix: technical notes for engineers
 
 **Stack.**
-- PostgreSQL 18, with raw SQL migrations 0001–0013 and no ORM.
+- PostgreSQL 18, with raw SQL migrations 0001–0014 and no ORM.
 - Python 3.12 worker: psycopg 3, lxml.
 - Next.js 15 web UI, which only reads views and computes no figures (D-076).
 - Hosting: Neon (database), Vercel (`fra1`) and GitHub Actions (worker scheduled hourly, reset

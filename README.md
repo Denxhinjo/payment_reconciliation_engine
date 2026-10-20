@@ -203,18 +203,24 @@ golden hash and the replay for identity, all in one transaction: on any failure 
 
 ## The web UI
 
-A Next.js app in `web/`. It reads stored runs and views and never computes a figure itself
-(D-076). Pages:
+A Next.js app in `web/`, designed after `Payment Reconciliation UI.pdf` (D-096). It reads stored
+runs and views and never computes a figure itself (D-076); every count and amount it shows comes
+from a database view. Pages:
 
-- **Sign in:** a "sign in as" picker over the synthetic staff. The accounts are public. The
-  system actor "Deployment seed", which seeded the demo, cannot sign in (D-091).
-- **Runs:** every run, including failed ones and replays.
-- **Run detail:** the record, results, and replay status, which is one of identical, drifted
-  (both hashes shown), failed to run, refused, or pending.
-- **Exceptions queue.**
-- **Exception detail:** evidence and resolution history, with forms to resolve or correct.
-- **Upload:** upload a file, and request a reconciliation.
-- **Jobs:** attempts, errors and requester per job; requeue for controllers.
+- **Sign in:** a "sign in as" picker over the synthetic staff, beside the demo month's counts.
+  The accounts are public. The system actor "Deployment seed", which seeded the demo, cannot
+  sign in (D-091).
+- **Runs (dashboard):** the statement period; matches, open exceptions, replay check and rows
+  compared; every run, including failed ones and replays; the planted problems, each checked
+  by the database against the run (D-096).
+- **Run detail:** how the matches were made, the exceptions by reason, replay verification
+  (identical, drifted with both hashes, failed to run, refused, or pending), and the inputs.
+- **Exceptions:** the queue, with the value under review (D-097), filters, and each break's
+  reference and amount.
+- **Exception detail:** evidence from each source, the arithmetic of a mismatch, the history,
+  and the form to resolve or correct.
+- **Upload:** upload a file, request a reconciliation, and see every imported file.
+- **Jobs:** counts, each job's target and result, attempts, requester; requeue for controllers.
 
 Access is enforced on the server for every page and every POST, not by hiding buttons (D-077).
 Replays and reconciliations are queued as jobs for the worker (D-078). Requeue is idempotent and

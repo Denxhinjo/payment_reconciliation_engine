@@ -63,7 +63,12 @@ WORKER_UPDATES = {"reconciliation_run", "job"}
 RUNNER_ONLY = {"schema_migration"}
 
 
-VIEWS = {"current_resolution", "exception_queue", "run_overview", "job_overview"}   # read-only for every role
+VIEWS = {"current_resolution", "exception_queue", "run_overview", "job_overview",   # read-only for every role
+         # migration 0014 (D-096): the figures the UI shows
+         "exception_figures", "run_figures", "latest_run", "run_exception_reasons", "import_file_overview",
+         "import_file_counts", "job_results", "job_counts", "run_planted_items"}
+# Reference data written only by migrations (D-096): read-only for both roles.
+READ_ONLY_TABLES = {"demo_planted_item", "demo_planted_files"}
 # Written only through requeue_failed_job() (SECURITY DEFINER), never directly (D-074).
 FUNCTION_WRITTEN = {"job_requeue"}
 
@@ -71,7 +76,7 @@ FUNCTION_WRITTEN = {"job_requeue"}
 def _expected(role: str, relation: str) -> set[str]:
     if relation in RUNNER_ONLY:
         return set()
-    if relation in VIEWS or relation in FUNCTION_WRITTEN:
+    if relation in VIEWS or relation in FUNCTION_WRITTEN or relation in READ_ONLY_TABLES:
         return {"SELECT"}
     if role == "recon_web":
         return {"SELECT"} | ({"INSERT"} if relation in WEB_WRITES else set())
